@@ -1,0 +1,17 @@
+{
+  "name": "Pox-Boy 3026 OS",
+  "short_name": "Pox-Boy",
+  "description": "Wasteland Survival Terminal.",
+  "start_url": "./",
+  "display": "fullscreen",
+  "background_color": "#051005",
+  "theme_color": "#051005",
+  "orientation": "landscape",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

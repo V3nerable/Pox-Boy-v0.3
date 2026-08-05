@@ -1,0 +1,404 @@
+        :root {
+            --pip-color: #1aff80;
+            --pip-color-dim: #0f8f48;
+            --pip-bg: #051005;
+            --crt-flicker: rgba(26, 255, 128, 0.05);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--pip-bg);
+            color: var(--pip-color);
+            font-family: 'VT323', monospace;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            text-transform: uppercase;
+        }
+
+        /* CRT Effects */
+        .crt::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 20;
+            background-size: 100% 4px, 3px 100%;
+            pointer-events: none;
+        }
+        .crt::after {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: var(--crt-flicker);
+            z-index: 20;
+            pointer-events: none;
+            animation: flicker 0.15s infinite;
+        }
+        @keyframes flicker {
+            0% { opacity: 0.9; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        /* Layout */
+        .header {
+            padding: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--pip-color);
+            font-size: 1.2rem;
+            text-shadow: 0 0 5px var(--pip-color);
+            position: relative;
+            z-index: 10;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .header-title { font-weight: bold; }
+        .header-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+
+        .theme-btn {
+            background: transparent;
+            border: 1px solid var(--pip-color);
+            color: var(--pip-color);
+            font-family: 'VT323', monospace;
+            font-size: 1rem;
+            padding: 2px 8px;
+            cursor: pointer;
+            text-transform: uppercase;
+            text-shadow: 0 0 5px var(--pip-color);
+        }
+        .theme-btn:hover { background: var(--pip-color); color: var(--pip-bg); text-shadow: none; }
+
+        .nav-tabs {
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 0;
+            border-bottom: 2px solid var(--pip-color-dim);
+            position: relative;
+            z-index: 10;
+            flex-wrap: wrap; 
+        }
+        .nav-item { font-size: 1.4rem; cursor: pointer; text-shadow: 0 0 5px var(--pip-color); opacity: 0.5; transition: opacity 0.2s; padding: 0 10px; }
+        .nav-item.active { opacity: 1; border-bottom: 3px solid var(--pip-color); }
+
+        .sub-nav { display: flex; justify-content: center; gap: 20px; padding: 5px 0; border-bottom: 1px dashed var(--pip-color-dim); font-size: 1rem; margin-bottom: 15px; }
+        .sub-nav-item { cursor: pointer; opacity: 0.5; }
+        .sub-nav-item.active { opacity: 1; text-decoration: underline; }
+
+        .content-area { flex-grow: 1; padding: 20px; overflow-y: auto; position: relative; z-index: 5; text-shadow: 0 0 4px var(--pip-color); }
+        .tab-content { display: none; font-size: 1.2rem; height: 100%; }
+        /* Special case for tabs that need flexbox instead of block */
+        .tab-content.active { display: block; }
+        #tab-cam.active { display: flex !important; }
+        .sub-tab-content { display: none; }
+        .sub-tab-content.active { display: block; }
+
+        /* Stats Layout */
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .special-list p { display: flex; justify-content: space-between; max-width: 150px; margin-bottom: 5px; }
+        .skills-list { column-count: 2; column-gap: 20px; }
+        .vault-boy-container { display: flex; justify-content: center; align-items: center; height: 200px; border: 1px dashed var(--pip-color); margin-bottom: 15px; }
+        .status-bars { margin-top: 20px; }
+        .stat-bar { display: flex; align-items: center; margin-bottom: 10px; }
+        .stat-label { width: 40px; }
+        .stat-fill-container { flex-grow: 1; height: 15px; border: 1px solid var(--pip-color); margin-left: 10px; }
+        .stat-fill { height: 100%; background-color: var(--pip-color); box-shadow: 0 0 8px var(--pip-color); }
+
+        /* Items / Quests Layout */
+        .item-row { display: flex; justify-content: space-between; padding: 8px; border-bottom: 1px dashed var(--pip-color-dim); cursor: pointer; transition: background 0.2s; }
+        .item-row:hover { background-color: var(--pip-color-dim); color: var(--pip-bg); text-shadow: none; }
+        .item-info { display: flex; flex-direction: column; }
+        .item-effects { font-size: 0.9rem; opacity: 0.7; }
+        .item-qty { font-weight: bold; }
+
+        .quest-objective { font-size: 0.9rem; opacity: 0.8; margin-top: 5px; padding-left: 15px; border-left: 1px solid var(--pip-color); }
+        .quest-completed { opacity: 0.5; }
+
+        /* Map Layout */
+        #map-container {
+            width: 100%; height: 300px; border: 2px solid var(--pip-color);
+            background-color: var(--pip-bg);
+            position: relative;
+            z-index: 5;
+        }
+        /* Magic trick: turns dark mode maps into glowing phosphor Pip-Boy maps
+           (tint follows the active theme via --tile-filter; default is GREEN) */
+        .leaflet-tile {
+            filter: var(--tile-filter, sepia(100%) hue-rotate(70deg) saturate(600%) brightness(1.1) contrast(1.2));
+        }
+        /* Restyle map controls to match Pip-Boy */
+        .leaflet-control-attribution {
+            background: rgba(0,0,0,0.7) !important;
+            color: var(--pip-color-dim) !important;
+            font-family: 'VT323', monospace;
+        }
+        .leaflet-control-attribution a { color: var(--pip-color) !important; }
+        .leaflet-bar a { 
+            background-color: var(--pip-bg) !important; 
+            color: var(--pip-color) !important; 
+            border: 1px solid var(--pip-color-dim) !important;
+            font-family: 'VT323', monospace;
+        }
+        .leaflet-bar a:hover { background-color: var(--pip-color-dim) !important; color: var(--pip-bg) !important;}
+
+        /* Radio Layout */
+        .radio-station { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid var(--pip-color-dim); cursor: pointer; }
+        .radio-station:hover, .radio-station.playing { background: var(--pip-color-dim); color: var(--pip-bg); }
+        .radio-indicator { width: 20px; visibility: hidden; }
+        .radio-station.playing .radio-indicator { visibility: visible; }
+
+        /* Footer */
+        .footer {
+            padding: 10px; border-top: 2px solid var(--pip-color);
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 1rem; position: relative; z-index: 10;
+        }
+        .footer-action-container { flex-grow: 1; text-align: center; }
+
+        .pip-btn {
+            background: transparent; border: 1px solid var(--pip-color); color: var(--pip-color);
+            font-family: 'VT323', monospace; font-size: 1.2rem; padding: 5px 15px; cursor: pointer;
+            text-transform: uppercase; text-shadow: 0 0 5px var(--pip-color); margin-top: 10px; width: 100%;
+        }
+        .pip-btn:hover { background: var(--pip-color); color: var(--pip-bg); text-shadow: none; }
+
+        @keyframes pulse-border {
+            0% { box-shadow: 0 0 5px var(--pip-color); }
+            50% { box-shadow: 0 0 25px var(--pip-color); }
+            100% { box-shadow: 0 0 5px var(--pip-color); }
+        }
+        .pulse-alert {
+            animation: pulse-border 1s infinite;
+        }
+
+        /* Modals */
+        .modal-overlay { display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 30; justify-content: center; align-items: center; padding: 20px; }
+        .modal-content { border: 2px solid var(--pip-color); background: var(--pip-bg); padding: 20px; width: 100%; max-width: 400px; box-shadow: 0 0 15px var(--pip-color-dim); max-height: 90vh; overflow-y: auto; }
+        .modal-content h3 { border-bottom: 1px solid var(--pip-color); padding-bottom: 5px; margin-bottom: 15px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; }
+        .pip-input { width: 100%; background: transparent; border: 1px solid var(--pip-color); color: var(--pip-color); font-family: 'VT323', monospace; font-size: 1.2rem; padding: 8px; outline: none; }
+        .pip-input option { background: var(--pip-bg); color: var(--pip-color); }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--pip-bg); }
+        ::-webkit-scrollbar-thumb { background: var(--pip-color-dim); }
+        ::-webkit-scrollbar-thumb:hover { background: var(--pip-color); }
+
+        /* Hide scrollbars for cinematic/immersion areas */
+        .hide-scroll::-webkit-scrollbar { display: none; }
+        .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+
+        @media (orientation: landscape) and (max-height: 600px) {
+            .header { padding: 5px 10px; }
+            .nav-tabs { padding: 5px 0; }
+            .content-area { padding: 10px; }
+            .vault-boy-container { height: 120px; }
+            /* Map and Cam heights are now handled dynamically by flexbox in landscape */
+        }
+        
+        .vk-btn { padding: 4px 0; margin: 0; min-width: 25px; flex-grow: 1; font-size: 1.2rem; }
+        
+        @media (orientation: landscape) and (max-height: 600px) {
+            .vk-btn { padding: 2px 0; font-size: 1rem; min-width: 20px;}
+            #keyboard-modal .modal-content { padding: 5px; border-width: 1px;}
+        }
+
+        /* Prevent native keyboard popup on inputs with 'vk-target' class */
+        input.vk-target { cursor: pointer; }
+
+        /* Split-screen layout for MAP and CAM tabs */
+        .split-view {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            height: 100%;
+        }
+        .split-main {
+            width: 100%;
+        }
+        .split-controls {
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        .landscape-only { display: none; }
+
+        @media (orientation: landscape) {
+            .split-view {
+                flex-direction: row;
+            }
+            .split-main {
+                flex: 2; /* 66% width */
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+            }
+            .split-controls {
+                flex: 1; /* 33% width */
+                height: 100%;
+                border-left: 2px dashed var(--pip-color-dim);
+                padding-left: 15px;
+                overflow-y: auto;
+            }
+            
+            /* Expand the Map/Video to completely fill their new 66% flex box */
+            #map-container { height: 100% !important; min-height: 0; }
+            #cam-container { height: 100% !important; min-height: 0; margin-bottom: 0; }
+            
+            .landscape-only { 
+                display: block; 
+                margin-bottom: 10px;
+                border-bottom: 1px solid var(--pip-color-dim);
+                padding-bottom: 5px;
+            }
+            
+            /* Hide non-essential headers to maximize vertical space */
+            #tab-map > h2, #tab-map > p { display: none; }
+            #tab-cam > h2, #tab-cam > p { display: none; }
+        }
+
+/* ============ CAM SPLIT LAYOUT (v0.24) ============ */
+/* Portrait: sensor feed on top, controls docked below */
+.cam-split {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+}
+.cam-media-pane {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    justify-content: center;
+}
+.cam-media-pane #cam-container {
+    margin-bottom: 0 !important;
+}
+.cam-controls-pane {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.cam-controls-pane .pip-btn {
+    margin-top: 0;
+    height: 46px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+#cam-save-controls .pip-btn { height: 46px; }
+
+/* Landscape: 4:3 sensor pane on the LEFT, all controls visible on the RIGHT (mirrors MAP tab) */
+@media (orientation: landscape) and (max-height: 600px) {
+    .cam-controls-pane .pip-btn { height: 38px; font-size: 1rem; }
+    #cam-save-controls .pip-btn { height: 38px; font-size: 1rem; }
+}
+@media (orientation: landscape) {
+    .cam-split {
+        flex-direction: row;
+        gap: 15px;
+    }
+    .cam-media-pane {
+        flex: 0 0 auto;
+        height: 100%;
+        aspect-ratio: 4 / 3;
+        max-width: 100%;
+        min-height: 0;
+    }
+    .cam-controls-pane {
+        flex: 1 1 auto;
+        min-width: 170px;
+        height: 100%;
+        overflow-y: auto;
+        border-left: 2px dashed var(--pip-color-dim);
+        padding-left: 15px;
+    }
+}
+
+/* ============ PRE-BOOT CALIBRATION FIT (v0.26) ============ */
+/* Universal overflow safety so the box can never hard-clip */
+#pre-boot-box {
+    max-height: 94vh;
+    overflow-y: auto;
+}
+
+/* Landscape compaction: small phones (~360px tall) were clipping top/bottom */
+@media (orientation: landscape) and (max-height: 600px) {
+    #pre-boot-overlay { padding: 8px; }
+    #pre-boot-box { padding: 12px !important; max-height: 96vh; }
+    #pre-boot-box h2 { margin-bottom: 8px !important; padding-bottom: 6px !important; font-size: 1.2rem; }
+    #pre-boot-box p { margin-bottom: 12px !important; font-size: 1rem !important; line-height: 1.2 !important; }
+    #pre-boot-box > div { gap: 8px !important; margin-bottom: 12px !important; }
+    #pre-boot-box .pip-btn { font-size: 1.1rem !important; padding: 6px 10px !important; margin-top: 0 !important; }
+}
+
+/* ============ THEME TINT VARIABLES (v0.27) ============ */
+:root {
+    --pip-rgb: 26, 255, 128;
+    --cam-filter: sepia(100%) hue-rotate(85deg) saturate(300%) brightness(0.8) contrast(1.8);
+    --tile-filter: sepia(100%) hue-rotate(70deg) saturate(600%) brightness(1.1) contrast(1.2);
+}
+
+/* ============ SENSOR / SCANNER THEME TINT (v0.27) ============ */
+#cam-video, #cam-canvas { filter: var(--cam-filter); }
+
+/* Theme the html5-qrcode injected UI + feed (was raw standard colour) */
+#qr-reader { background: transparent; }
+#qr-reader video { filter: var(--cam-filter); }
+#qr-reader a, #qr-reader span, #qr-reader div, #qr-reader select {
+    color: var(--pip-color) !important;
+    font-family: 'VT323', monospace !important;
+}
+#qr-reader select { background: var(--pip-bg) !important; border: 1px solid var(--pip-color-dim) !important; }
+#qr-reader button {
+    color: var(--pip-color) !important;
+    background: var(--pip-bg) !important;
+    border: 1px solid var(--pip-color) !important;
+    font-family: 'VT323', monospace !important;
+    padding: 4px 12px !important;
+    margin: 6px 4px !important;
+    cursor: pointer;
+    text-transform: uppercase;
+}
+#qr-reader img { filter: var(--cam-filter); }
+
+/* ============ DATABANK TILES (v0.27) ============ */
+.photo-tile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 8px;
+}
+.photo-tile {
+    border: 1px solid var(--pip-color-dim);
+    height: 90px; /* fixed height: aspect-ratio unsupported on older WebKit = collapsed tiles */
+    overflow: hidden;
+    cursor: pointer;
+    background: #000;
+    padding: 0;
+}
+.photo-tile img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.photo-tile:hover {
+    border-color: var(--pip-color);
+    box-shadow: 0 0 8px var(--pip-color-dim);
+}
