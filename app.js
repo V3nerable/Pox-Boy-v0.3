@@ -1141,6 +1141,49 @@
         const bootOptSizeBtn = document.getElementById('options-size-btn');
         if (bootOptSizeBtn) bootOptSizeBtn.innerText = `[SIZE: ${sizeLabels[sizeIndex]}]`;
 
+        // ================= ORIENTATION LOCK (v0.36) =================
+        // AUTO = v0.33 behaviour: rotation follows the device, split layouts engage via
+        // media queries. PORTRAIT / LANDSCAPE = user-forced lock via the Screen Orientation
+        // API, persisted across launches. Android Chrome honours lock() -- most reliably
+        // when installed/fullscreen, so rejections are swallowed and re-applied on every
+        // fullscreenchange (the lock bites the moment immersion is available). iOS Safari
+        // exposes no lock() at all: feature guard fails, preference still persists and
+        // labels, rotation simply stays free. AUTO calls unlock() and is the undo path.
+        const orientationModes = ['auto', 'portrait', 'landscape'];
+        const orientationLabels = ['AUTO', 'PORTRAIT', 'LANDSCAPE'];
+        let orientationIndex = orientationModes.indexOf(localStorage.getItem('pipboy-orientation'));
+        if (orientationIndex < 0) orientationIndex = 0;
+
+        function applyOrientationLock() {
+            if (screen.orientation && typeof screen.orientation.lock === 'function') {
+                if (orientationIndex === 0) {
+                    try { screen.orientation.unlock(); } catch (e) {}
+                } else {
+                    try {
+                        const p = screen.orientation.lock(orientationModes[orientationIndex]);
+                        if (p && p.catch) p.catch(function(){}); // rejected pre-fullscreen on some builds; fullscreenchange re-applies
+                    } catch (e) {}
+                }
+            }
+            const optOrientBtn = document.getElementById('options-orient-btn');
+            if (optOrientBtn) optOrientBtn.innerText = `[ORIENTATION: ${orientationLabels[orientationIndex]}]`;
+        }
+
+        function cycleOrientation() {
+            orientationIndex = (orientationIndex + 1) % orientationModes.length;
+            localStorage.setItem('pipboy-orientation', orientationModes[orientationIndex]);
+            applyOrientationLock();
+            showNotification(`ORIENTATION: ${orientationLabels[orientationIndex]}${orientationIndex === 0 ? ' (FOLLOWS DEVICE)' : ' LOCKED'}`);
+        }
+
+        // Re-apply the saved preference whenever immersion flips so a lock that was
+        // rejected outside fullscreen engages the instant fullscreen becomes available.
+        ['fullscreenchange', 'webkitfullscreenchange'].forEach(function(evt) {
+            document.addEventListener(evt, applyOrientationLock);
+        });
+
+        applyOrientationLock(); // re-apply saved preference at boot + paint the button label
+
         // Inventory Logic
         function renderInventory(category) {
             const container = document.getElementById('inv-container');
