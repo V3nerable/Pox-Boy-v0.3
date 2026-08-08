@@ -805,6 +805,8 @@
                 if (currentDataTab === 'quests') renderQuests();
                 if (currentDataTab === 'factions') renderFactions();
                 if (currentDataTab === 'stats') renderStatsTab();
+                if (currentDataTab === 'wastelanders') renderWastelanders();
+                if (currentDataTab === 'mail') { renderMail(); refreshOutboxStatuses(); }
             }
             if (tabId === 'map') {
                 // Leaflet needs to calculate size AFTER display block is applied
@@ -842,6 +844,8 @@
                 if (subTabId === 'quests') renderQuests();
                 if (subTabId === 'factions') renderFactions();
                 if (subTabId === 'stats') renderStatsTab();
+                if (subTabId === 'wastelanders') renderWastelanders();
+                if (subTabId === 'mail') { renderMail(); refreshOutboxStatuses(); }
             } else {
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
                 document.getElementById(`sub-${parentTab}-${subTabId}`).classList.add('active');
@@ -1104,14 +1108,18 @@
         setInterval(updateFsButtons, 500);
         updateFsButtons();
 
-        let sizeIndex = 2; // Default to SHRINK 2
         const paddingModes = [0, 15, 30]; 
         const sizeLabels = ["MAX", "SHRINK 1", "SHRINK 2"];
+        // v0.32: padding choice now persists across launches. Installed PWAs default to
+        // MAX (edge-to-edge immersion); browser tabs keep the SHRINK 2 default.
+        const savedSizeIndex = parseInt(localStorage.getItem('pipboy-size-index'), 10);
+        let sizeIndex = (savedSizeIndex >= 0 && savedSizeIndex <= 2) ? savedSizeIndex : (getDisplayMode() !== 'browser' ? 0 : 2);
         
         function cycleSize() {
             sizeIndex = (sizeIndex + 1) % paddingModes.length;
             const label = sizeLabels[sizeIndex];
             document.body.style.padding = `${paddingModes[sizeIndex]}px`;
+            localStorage.setItem('pipboy-size-index', sizeIndex);
             
             const mainBtn = document.getElementById('size-display');
             if (mainBtn) mainBtn.innerText = `[SIZE: ${label}]`;
@@ -1119,8 +1127,12 @@
             if (pbBtn) pbBtn.innerText = `[2] SCREEN PADDING: ${label}`;
         }
         
-        // Apply default size immediately
+        // Apply loaded/default size immediately + sync both button labels to it
         document.body.style.padding = `${paddingModes[sizeIndex]}px`;
+        const bootMainBtn = document.getElementById('size-display');
+        if (bootMainBtn) bootMainBtn.innerText = `[SIZE: ${sizeLabels[sizeIndex]}]`;
+        const bootPbBtn = document.getElementById('pb-size-btn');
+        if (bootPbBtn) bootPbBtn.innerText = `[2] SCREEN PADDING: ${sizeLabels[sizeIndex]}`;
 
         // Inventory Logic
         function renderInventory(category) {
@@ -1602,6 +1614,12 @@
                     label: "YES, COMPLETE QUEST",
                     action: () => {
                         quest.completed = true;
+                        // v0.31: player-issued CONTRACTs write fulfillment back to the
+                        // original mailbox letter so the GIVER's outbox flips to
+                        // "CONTRACT FULFILLED" on their next outbox status refresh.
+                        if (quest.contractKey && window.db) {
+                            try { window.firebaseSet(window.firebaseRef(window.db, 'mail/' + myMailUid + '/' + quest.contractKey + '/fulfilled'), true).catch(()=>{}); } catch(e){}
+                        }
                         if (quest.giver && quest.giver !== "UNKNOWN WASTELANDER") {
                             const linkedFaction = factions.find(f => f.name === quest.giver);
                             if (linkedFaction) {
@@ -1793,7 +1811,13 @@
         function onScanSuccess(decodedText, decodedResult) {
             stopQRScanner();
             document.getElementById('qr-scan-modal').style.display = 'none';
-            
+
+            // v0.31: profile datacards are plain-text, not JSON — route them first
+            if (typeof decodedText === 'string' && decodedText.indexOf('poxboy:') === 0) {
+                handleDatacardScan(decodedText);
+                return;
+            }
+
             try {
                 const data = JSON.parse(decodedText);
                 
@@ -2044,6 +2068,9 @@
                 openAddWaypointModal(e.latlng.lat, e.latlng.lng);
             });
 
+            // Tapping empty map clears the sticky wastelander selection
+            pipMap.on('click', function() { if (selectedBeaconUid) deselectBeacon(); });
+
             markersGroup = L.layerGroup().addTo(pipMap);
             otherPlayersGroup = L.layerGroup().addTo(pipMap);
             renderMarkers();
@@ -2054,8 +2081,9 @@
                 window.firebaseOnValue(usersRef, (snapshot) => {
                     otherPlayersGroup.clearLayers();
                     const data = snapshot.val();
-                    if (!data) return;
-                    
+                    lastKnownBeaconData = data || {}; // sticky-select card + rolodex presence read from this
+                    if (!data) { if (selectedBeaconUid) updateMapUserCard(); return; }
+
                     const otherPlayerIcon = L.divIcon({
                         className: 'custom-pip-marker',
                         html: `<div style="background-color: transparent; width: 14px; height: 14px; border-radius: 50%; border: 2px dashed #ffb642; box-shadow: 0 0 10px #ffb642;"></div>`,
@@ -2067,7 +2095,7 @@
 
                     for (let uid in data) {
                         if (uid === myUid) continue; // Don't draw ourselves twice
-                        
+
                         const p = data[uid];
 
                         // Skip any beacon older than 24 hours (keeps the radar map clean)
@@ -2076,20 +2104,27 @@
                         // Calculate how old this data is
                         const ageInMinutes = Math.floor((Date.now() - p.timestamp) / 60000);
                         let nameLabel = p.name;
-                        
+
                         // If the data is older than 5 minutes, mark them as 'Last Known Location'
                         if (ageInMinutes > 5) {
                             nameLabel += ` (LKL: ${ageInMinutes}m ago)`;
                         }
 
-                        L.marker([p.lat, p.lng], {icon: otherPlayerIcon, zIndexOffset: 900})
+                        const pMarker = L.marker([p.lat, p.lng], {icon: otherPlayerIcon, zIndexOffset: 900})
                             .bindTooltip(nameLabel, {
-                                permanent: false, 
-                                direction: 'top', 
+                                permanent: false,
+                                direction: 'top',
                                 className: 'pip-tooltip'
                             })
                             .addTo(otherPlayersGroup);
+                        // v0.31 sticky-select: tap a beacon to pin their info card
+                        pMarker.on('click', (e) => {
+                            L.DomEvent.stopPropagation(e.originalEvent);
+                            selectBeacon(uid);
+                        });
                     }
+                    // Live-refresh the pinned card as beacons stream in
+                    if (selectedBeaconUid) updateMapUserCard();
                 });
             }
         }
@@ -2227,6 +2262,7 @@
 
                     const lat = position.coords.latitude;
                     const lng = position.coords.longitude;
+                    myLastLat = lat; myLastLng = lng; // feeds map wastelander-card distance readout
                     
                     btn.innerText = "[DISABLE GPS TRACKING]";
                     btn.style.background = "var(--pip-color-dim)";
@@ -2724,6 +2760,740 @@
             document.getElementById('cam-active-state').style.display = 'none';
             document.getElementById('cam-menu-state').style.display = 'flex';
         }
+
+        // ==================== P2P COMMS STACK (v0.31) ====================
+        // Datacard identity + WASTELANDERS MET rolodex + Firebase mailbox
+        // (quests / items / messages) + one-scan mutual handshake + UNVERIFIED
+        // quarantine. localStorage stays the store of record (directive 7);
+        // Firebase is only the postal service.
+
+        // --- Identity: the UID now exists at boot, not just when GPS is enabled ---
+        let myMailUid = localStorage.getItem('pipboy-uid');
+        if (!myMailUid) {
+            myMailUid = 'user_' + Date.now() + Math.floor(Math.random()*1000);
+            localStorage.setItem('pipboy-uid', myMailUid);
+        }
+
+        // --- Comms state (all persisted locally) ---
+        let rolodex = JSON.parse(localStorage.getItem('pipboy-rolodex') || '[]');
+        let outbox = JSON.parse(localStorage.getItem('pipboy-outbox') || '[]');
+        let mailLog = JSON.parse(localStorage.getItem('pipboy-maillog') || '[]');
+        let mailSeen = JSON.parse(localStorage.getItem('pipboy-mail-seen') || '[]');
+        let mailProcessed = JSON.parse(localStorage.getItem('pipboy-mail-processed') || '[]');
+        let inboxLetters = {};       // live mailbox snapshot, trusted senders only
+        let unverifiedLetters = {};  // live quarantine bucket, unknown senders
+        let contactUidTarget = null; // recipient of the current composer / contact sheet
+        let selectedBeaconUid = null;
+        let lastKnownBeaconData = {};
+        let myLastLat = null, myLastLng = null;
+        let ciSelectedItemId = null;
+
+        function saveComms() {
+            localStorage.setItem('pipboy-rolodex', JSON.stringify(rolodex));
+            localStorage.setItem('pipboy-outbox', JSON.stringify(outbox));
+            localStorage.setItem('pipboy-maillog', JSON.stringify(mailLog));
+            localStorage.setItem('pipboy-mail-seen', JSON.stringify(mailSeen.slice(-500)));
+        }
+        function saveProcessed() {
+            localStorage.setItem('pipboy-mail-processed', JSON.stringify(mailProcessed.slice(-500)));
+        }
+        function contactByUid(uid) { return rolodex.find(c => c.uid === uid) || null; }
+        function isContact(uid) { return !!contactByUid(uid); }
+        function escapeHtml(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        }
+        function mailTabActive() {
+            return document.getElementById('tab-data').classList.contains('active') && currentDataTab === 'mail';
+        }
+        function safeUid(uid) { return String(uid || '').replace(/[^A-Za-z0-9_\-]/g, ''); }
+
+        // --- MY DATACARD: broadcast identity QR (plain-text, not JSON) ---
+        function openDatacard() {
+            document.getElementById('datacard-name').innerText = userProfile.name || 'UNKNOWN';
+            const canvas = document.getElementById('datacard-qr-canvas');
+            canvas.innerHTML = '';
+            new QRCode(canvas, {
+                text: 'poxboy:' + myMailUid + ':' + (userProfile.name || 'UNKNOWN'),
+                width: 220,
+                height: 220,
+                colorDark : '#051005',
+                colorLight : '#1aff80',
+                correctLevel : QRCode.CorrectLevel.L
+            });
+            document.getElementById('datacard-modal').style.display = 'flex';
+        }
+
+        // --- PROFILE SCAN: add to rolodex + fire the one-scan handshake letter ---
+        function handleDatacardScan(text) {
+            const rest = text.slice('poxboy:'.length);
+            const sep = rest.indexOf(':');
+            const uid = sep > -1 ? rest.slice(0, sep) : rest;
+            const name = (sep > -1 ? rest.slice(sep + 1) : 'UNKNOWN WASTELANDER').toUpperCase();
+            if (!uid) { showNotification('DATACARD CORRUPTED. RESCAN.'); return; }
+            if (uid === myMailUid) { showNotification('THAT IS YOUR OWN DATACARD, WASTELANDER.'); return; }
+            if (isContact(uid)) { showNotification(contactByUid(uid).name + ' ALREADY LOGGED IN WASTELANDERS MET.'); return; }
+            showCustomPrompt('ADD ' + name + ' TO WASTELANDERS MET? THEY WILL BE NOTIFIED OF THE LINK.', [
+                {
+                    label: 'ADD CONTACT + SEND LINK',
+                    action: () => {
+                        addContact(uid, name);
+                        sendHandshake(uid);
+                        if (currentDataTab === 'wastelanders') renderWastelanders();
+                    }
+                },
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+
+        function addContact(uid, name) {
+            if (isContact(uid)) return;
+            rolodex.push({ uid: uid, name: name || 'UNKNOWN', metAt: Date.now() });
+            saveComms();
+            // Promote any quarantined transmissions from this frequency into the live inbox
+            let promoted = 0;
+            for (let key in unverifiedLetters) {
+                if (unverifiedLetters[key].from === uid) {
+                    inboxLetters[key] = unverifiedLetters[key];
+                    delete unverifiedLetters[key];
+                    promoted++;
+                }
+            }
+            showNotification('CONTACT SECURED: ' + (name || 'UNKNOWN') + (promoted ? ' (' + promoted + ' HELD TRANSMISSION' + (promoted > 1 ? 'S' : '') + ' UNLOCKED)' : ''));
+            renderMailBadge();
+        }
+
+        // One-scan mutual link: scanning a datacard posts a handshake into THEIR mailbox;
+        // them accepting puts YOU in THEIR rolodex. (Spam-proof: the letter can only
+        // exist if you were physically shown their card.)
+        function sendHandshake(uid) {
+            queueMail(uid, 'handshake', {}, 'LINK REQUEST');
+        }
+
+        // --- OUTBOX: queue offline, flush when the satellite comes back ---
+        function queueMail(toUid, type, payload, summary) {
+            const entry = {
+                id: 'ob' + Date.now() + '_' + Math.floor(Math.random()*100000),
+                to: toUid, type: type, payload: payload,
+                summary: summary || type.toUpperCase(),
+                status: 'queued', ts: Date.now(), key: null
+            };
+            outbox.push(entry);
+            saveComms();
+            flushOutbox();
+            renderMailBadge();
+            return entry;
+        }
+
+        function flushOutbox() {
+            if (!window.db) return;
+            outbox.forEach(entry => {
+                if (entry.status !== 'queued') return;
+                entry.status = 'sending';
+                const key = 'm' + entry.ts + '_' + Math.floor(Math.random()*1000000);
+                const letter = { type: entry.type, from: myMailUid, fromName: userProfile.name || 'UNKNOWN', ts: entry.ts, payload: entry.payload };
+                window.firebaseSet(window.firebaseRef(window.db, 'mail/' + entry.to + '/' + key), letter)
+                    .then(() => {
+                        entry.status = 'sent';
+                        entry.key = key;
+                        saveComms();
+                        if (mailTabActive()) renderMail();
+                    })
+                    .catch(() => { entry.status = 'queued'; });
+            });
+            saveComms();
+        }
+
+        // Lazy status read on mailed letters (AWAITING → ACCEPTED / DECLINED / FULFILLED)
+        let outboxRefreshRunning = false;
+        function refreshOutboxStatuses() {
+            if (!window.db || outboxRefreshRunning) return;
+            const pending = outbox.filter(e => e.key && e.status === 'sent');
+            if (!pending.length) return;
+            outboxRefreshRunning = true;
+            let left = pending.length;
+            const doneOne = () => { if (--left <= 0) { outboxRefreshRunning = false; saveComms(); if (mailTabActive()) renderMail(); } };
+            pending.forEach(e => {
+                window.firebaseGet(window.firebaseRef(window.db, 'mail/' + e.to + '/' + e.key))
+                    .then(snap => {
+                        const v = snap.val();
+                        if (!v) {
+                            if (e.type === 'handshake') e.status = 'closed'; // receiver processed + retired the letter
+                        } else if (v.fulfilled) {
+                            e.status = 'fulfilled';
+                        } else if (v.claimed) {
+                            e.status = 'accepted';
+                        } else if (v.declined) {
+                            e.status = 'declined';
+                            // MOVE policy: a declined shipment returns the goods to the sender
+                            if (e.type === 'item' && !e.refunded) {
+                                refundItemPayload(e.payload);
+                                e.refunded = true;
+                                showNotification('TRANSMISSION DECLINED — ITEM RETURNED TO INVENTORY.');
+                            }
+                        }
+                    })
+                    .catch(() => {})
+                    .finally(doneOne);
+            });
+        }
+
+        // Grant/merge an item payload into local inventory (used by acceptItem + refunds)
+        function refundItemPayload(p) {
+            const existing = items.find(i => i.name === p.name && i.type === p.type);
+            if (existing) existing.quantity += (p.quantity || 1);
+            else items.push({ id: Date.now(), name: p.name, type: p.type, effects: p.effects, quantity: p.quantity || 1, equipped: false });
+            saveToStorage();
+            renderInventory(currentInvTab);
+        }
+
+        function notifyTxResult() {
+            if (window.db && navigator.onLine !== false) showNotification('TRANSMISSION SENT.');
+            else showNotification('NO SIGNAL — TRANSMISSION QUEUED.');
+        }
+
+        // --- INBOX: mailbox listener (same firebaseOnValue pattern as the radar) ---
+        function startMailListener() {
+            window.firebaseOnValue(window.firebaseRef(window.db, 'mail/' + myMailUid), (snap) => {
+                processInboxSnapshot(snap.val() || {});
+            }, () => {}); // permission/offline errors: stay silent, we have local copies
+        }
+
+        function processInboxSnapshot(data) {
+            let changedSeen = false;
+            inboxLetters = {};
+            const stillUnverified = {};
+            for (let key in data) {
+                const l = data[key];
+                if (!l || !l.type) continue;
+                if (mailProcessed.indexOf(key) !== -1) {
+                    // Housekeeping: letters we already consumed that the sender never cleared
+                    // are purged after 2 hours so mailboxes don't accrete forever.
+                    if ((l.claimed || l.declined) && l.ts && (Date.now() - l.ts) > 2 * 3600 * 1000) retireLetter(key);
+                    continue;
+                }
+                if (l.type === 'handshake') {
+                    if (isContact(l.from)) {
+                        // Link already mutual: retire the letter silently
+                        retireLetter(key);
+                        continue;
+                    }
+                    if (mailSeen.indexOf(key) === -1) {
+                        mailSeen.push(key); changedSeen = true;
+                        showCustomPrompt((l.fromName || 'UNKNOWN') + ' HAS SCANNED YOUR DATACARD. ADD THEM TO WASTELANDERS MET?', [
+                            {
+                                label: 'ACCEPT LINK',
+                                action: () => {
+                                    addContact(safeUid(l.from), (l.fromName || 'UNKNOWN').toUpperCase());
+                                    retireLetter(key);
+                                    if (currentDataTab === 'wastelanders') renderWastelanders();
+                                }
+                            },
+                            { label: 'IGNORE', color: 'var(--pip-color-dim)', action: () => { retireLetter(key); } }
+                        ]);
+                    }
+                    continue; // handshakes are prompts, never inbox rows
+                }
+                if (isContact(l.from)) {
+                    inboxLetters[key] = l;
+                    if (mailSeen.indexOf(key) === -1) {
+                        mailSeen.push(key); changedSeen = true;
+                        showNotification('INCOMING TRANSMISSION — ' + (l.fromName || 'UNKNOWN') + ': ' + typeSummary(l));
+                    }
+                } else {
+                    stillUnverified[key] = l;
+                    if (mailSeen.indexOf(key) === -1) {
+                        mailSeen.push(key); changedSeen = true;
+                        showNotification('UNTRUSTED TRANSMISSION HELD IN MAIL QUARANTINE. SCAN THEIR DATACARD TO UNLOCK.');
+                    }
+                }
+            }
+            unverifiedLetters = stillUnverified;
+            if (mailSeen.length > 500) mailSeen = mailSeen.slice(-500);
+            if (changedSeen) saveComms();
+            renderMailBadge();
+            if (mailTabActive()) renderMail();
+        }
+
+        function retireLetter(key) {
+            if (!window.db) return;
+            window.firebaseRemove(window.firebaseRef(window.db, 'mail/' + myMailUid + '/' + key)).catch(() => {});
+        }
+        function flagLetter(key, field) {
+            if (!window.db) return;
+            window.firebaseSet(window.firebaseRef(window.db, 'mail/' + myMailUid + '/' + key + '/' + field), true).catch(() => {});
+        }
+        function markProcessed(key) {
+            mailProcessed.push(key);
+            if (mailProcessed.length > 500) mailProcessed = mailProcessed.slice(-500);
+            saveProcessed();
+            delete inboxLetters[key];
+        }
+
+        function typeSummary(l) {
+            if (l.type === 'quest') return 'QUEST: ' + (l.payload && l.payload.title ? l.payload.title : '');
+            if (l.type === 'item') return 'ITEM: ' + (l.payload && l.payload.name ? l.payload.name : '') + ' x' + (l.payload && l.payload.quantity ? l.payload.quantity : 1);
+            return 'MESSAGE';
+        }
+
+        function openMailItem(key) {
+            const l = inboxLetters[key];
+            if (!l) return;
+            const from = (l.fromName || 'UNKNOWN');
+            if (l.type === 'msg') {
+                showCustomPrompt('MESSAGE FROM ' + from + ': "' + (l.payload.text || '') + '"', [
+                    { label: 'LOG TRANSMISSION', action: () => acceptMsg(key, l) },
+                    { label: 'DELETE', color: '#ff3333', action: () => declineLetter(key) }
+                ]);
+            } else if (l.type === 'quest') {
+                const p = l.payload || {};
+                showCustomPrompt('QUEST FROM ' + from + ': "' + (p.title || '') + '"' + (p.brief ? ' — ' + p.brief : '') + ' — OBJ: ' + ((p.objectives || []).join(' / ') || 'NONE') + (p.reward ? ' — REWARD: ' + p.reward : ''), [
+                    { label: 'ACCEPT CONTRACT', action: () => acceptQuest(key, l) },
+                    { label: 'DECLINE', color: '#ff3333', action: () => declineLetter(key) }
+                ]);
+            } else if (l.type === 'item') {
+                const p = l.payload || {};
+                showCustomPrompt('ITEM FROM ' + from + ': ' + (p.name || 'UNKNOWN') + ' x' + (p.quantity || 1) + '. ADD TO INVENTORY?', [
+                    { label: 'TAKE ITEM', action: () => acceptItem(key, l) },
+                    { label: 'DECLINE', color: '#ff3333', action: () => declineLetter(key) }
+                ]);
+            }
+        }
+
+        function acceptMsg(key, l) {
+            mailLog.unshift({ dir: 'in', uid: l.from, name: (l.fromName || 'UNKNOWN'), text: (l.payload.text || ''), ts: l.ts || Date.now() });
+            if (mailLog.length > 100) mailLog.pop();
+            flagLetter(key, 'claimed');
+            markProcessed(key);
+            saveComms();
+            showNotification('TRANSMISSION LOGGED.');
+            if (mailTabActive()) renderMail();
+        }
+
+        function acceptQuest(key, l) {
+            const p = l.payload || {};
+            const objectives = [];
+            if (p.brief) objectives.push('BRIEF: ' + p.brief);
+            (p.objectives || []).forEach(o => objectives.push(o));
+            if (p.reward) objectives.push('REWARD: ' + p.reward);
+            if (!objectives.length) objectives.push('Completion terms: see contract giver.');
+            quests.push({
+                id: Date.now(),
+                name: (p.title || 'UNNAMED CONTRACT').toUpperCase(),
+                type: 'CONTRACT',
+                giver: (l.fromName || 'UNKNOWN').toUpperCase(),
+                location: 'P2P LINK',
+                timeStr: p.timeStr || '--:--',
+                expireTime: p.expireTime || null,
+                objectives: objectives,
+                completed: false, expired: false, abandoned: false,
+                contractKey: key, contractGiver: l.from
+            });
+            flagLetter(key, 'claimed');
+            markProcessed(key);
+            saveToStorage();
+            renderQuests();
+            showNotification('CONTRACT ACCEPTED: ' + (p.title || '').toUpperCase());
+            if (mailTabActive()) renderMail();
+        }
+
+        function acceptItem(key, l) {
+            const p = l.payload || {};
+            refundItemPayload(p);
+            flagLetter(key, 'claimed');
+            markProcessed(key);
+            showNotification('ITEM SECURED: ' + (p.name || 'UNKNOWN') + ' x' + (p.quantity || 1));
+            if (mailTabActive()) renderMail();
+        }
+
+        function declineLetter(key) {
+            flagLetter(key, 'declined');
+            markProcessed(key);
+            if (mailTabActive()) renderMail();
+        }
+
+        // --- RENDERERS: badge / rolodex / mail ---
+        function renderMailBadge() {
+            const el = document.getElementById('data-mail-navitem');
+            if (!el) return;
+            const n = Object.keys(inboxLetters).length;
+            const u = Object.keys(unverifiedLetters).length;
+            el.innerText = 'MAIL' + (n ? ' (' + n + ')' : '') + (u ? ' (' + u + '?)' : '');
+        }
+
+        function renderWastelanders() {
+            const el = document.getElementById('wastelanders-list');
+            if (!el) return;
+            if (!rolodex.length) {
+                el.innerHTML = '<p style="text-align:center; opacity:0.5;">NO CONTACTS YET. SCAN A WASTELANDER\'S DATACARD.</p>';
+                return;
+            }
+            el.innerHTML = '';
+            [...rolodex].sort((a, b) => (a.name || '').localeCompare(b.name || '')).forEach(c => {
+                const b2 = lastKnownBeaconData[c.uid];
+                let presence = 'SIGNAL UNKNOWN';
+                if (b2 && b2.timestamp) {
+                    const m = Math.floor((Date.now() - b2.timestamp) / 60000);
+                    presence = m < 5 ? 'LIVE SIGNAL' : ('LKL ' + m + 'M AGO');
+                }
+                const row = document.createElement('div');
+                row.className = 'item-row';
+                row.innerHTML = '<div class="item-info"><div>' + escapeHtml(c.name) + '</div><div class="item-effects">' + presence + '</div></div><div class="item-qty">&gt;</div>';
+                row.onclick = () => openContactSheet(c.uid);
+                el.appendChild(row);
+            });
+        }
+
+        function openContactSheet(uid) {
+            const c = contactByUid(uid);
+            if (!c) return;
+            contactUidTarget = uid;
+            document.getElementById('contact-name').innerText = c.name;
+            const b = lastKnownBeaconData[uid];
+            let presence = 'SIGNAL UNKNOWN';
+            if (b && b.timestamp) {
+                const m = Math.floor((Date.now() - b.timestamp) / 60000);
+                presence = m < 5 ? 'LIVE SIGNAL' : ('LAST SEEN ' + m + 'M AGO');
+            }
+            document.getElementById('contact-meta').innerText = 'MET: ' + new Date(c.metAt).toLocaleDateString() + ' | ' + presence;
+            document.getElementById('contact-modal').style.display = 'flex';
+        }
+
+        function removeActiveContact() {
+            const c = contactByUid(contactUidTarget);
+            if (!c) return closeModals();
+            showCustomPrompt('REMOVE ' + c.name + ' FROM WASTELANDERS MET? TRANSMISSIONS FROM THEM WILL BE QUARANTINED.', [
+                {
+                    label: 'YES, REMOVE',
+                    color: '#ff3333',
+                    action: () => {
+                        rolodex = rolodex.filter(x => x.uid !== contactUidTarget);
+                        saveComms();
+                        closeModals();
+                        renderWastelanders();
+                        renderMailBadge();
+                    }
+                },
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+
+        // --- COMPOSERS (contact-gated: you can only transmit to scanned contacts) ---
+        function composeTo(kind, uidOverride) {
+            const uid = uidOverride || contactUidTarget;
+            const c = contactByUid(uid);
+            if (!c) { showNotification('NO CONTACT SELECTED.'); return; }
+            contactUidTarget = uid;
+            closeModals();
+            if (kind === 'msg') {
+                document.getElementById('cm-title').innerText = 'MESSAGE TO: ' + c.name;
+                document.getElementById('cm-text').value = '';
+                document.getElementById('compose-msg-modal').style.display = 'flex';
+            } else if (kind === 'quest') {
+                document.getElementById('cq-title').innerText = 'QUEST TO: ' + c.name;
+                ['cq-name','cq-brief','cq-obj1','cq-obj2','cq-obj3','cq-reward'].forEach(id => { document.getElementById(id).value = ''; });
+                document.getElementById('cq-limit').value = '0';
+                document.getElementById('compose-quest-modal').style.display = 'flex';
+            } else if (kind === 'item') {
+                openItemComposer(c);
+            }
+        }
+
+        function transmitMsg() {
+            const text = document.getElementById('cm-text').value.trim();
+            if (!text) return showNotification('MESSAGE CANNOT BE EMPTY.');
+            const c = contactByUid(contactUidTarget);
+            if (!c) return closeModals();
+            queueMail(c.uid, 'msg', { text: text.toUpperCase() }, 'MESSAGE');
+            mailLog.unshift({ dir: 'out', uid: c.uid, name: c.name, text: text.toUpperCase(), ts: Date.now() });
+            if (mailLog.length > 100) mailLog.pop();
+            saveComms();
+            closeModals();
+            notifyTxResult();
+        }
+
+        function transmitQuest() {
+            const title = document.getElementById('cq-name').value.trim();
+            if (!title) return showNotification('A QUEST NEEDS A TITLE.');
+            const brief = document.getElementById('cq-brief').value.trim().toUpperCase();
+            const objectives = ['cq-obj1','cq-obj2','cq-obj3']
+                .map(id => document.getElementById(id).value.trim())
+                .filter(Boolean)
+                .map(s => s.toUpperCase());
+            if (!objectives.length) objectives.push('COMPLETION TERMS: SEE GIVER.');
+            const reward = document.getElementById('cq-reward').value.trim().toUpperCase();
+            const limitMin = parseInt(document.getElementById('cq-limit').value, 10) || 0;
+            let expireTime = null, timeStr = '--:--';
+            if (limitMin > 0) {
+                expireTime = Date.now() + limitMin * 60000;
+                const d = new Date(expireTime);
+                timeStr = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+            }
+            const c = contactByUid(contactUidTarget);
+            if (!c) return closeModals();
+            queueMail(c.uid, 'quest', { title: title.toUpperCase(), brief: brief, objectives: objectives, reward: reward, expireTime: expireTime, timeStr: timeStr }, 'QUEST: ' + title.toUpperCase());
+            closeModals();
+            notifyTxResult();
+        }
+
+        function openItemComposer(c) {
+            document.getElementById('ci-title').innerText = 'ITEM TO: ' + c.name;
+            ciSelectedItemId = null;
+            document.getElementById('ci-qty').value = '1';
+            const list = document.getElementById('ci-item-list');
+            list.innerHTML = '';
+            if (!items.length) {
+                list.innerHTML = '<p style="text-align:center; opacity:0.5; padding:10px;">INVENTORY EMPTY</p>';
+            } else {
+                items.forEach(it => {
+                    const row = document.createElement('div');
+                    row.className = 'item-row';
+                    row.innerHTML = '<div class="item-info"><div>' + escapeHtml(it.name) + '</div><div class="item-effects">' + escapeHtml(it.effects || '') + '</div></div><div class="item-qty">x' + it.quantity + '</div>';
+                    row.onclick = () => {
+                        ciSelectedItemId = it.id;
+                        list.querySelectorAll('.item-row').forEach(r => r.style.background = '');
+                        row.style.background = 'var(--pip-color-dim)';
+                        const cur = parseInt(document.getElementById('ci-qty').value, 10) || 1;
+                        if (cur > it.quantity) document.getElementById('ci-qty').value = it.quantity;
+                    };
+                    list.appendChild(row);
+                });
+            }
+            document.getElementById('compose-item-modal').style.display = 'flex';
+        }
+
+        function ciStep(d) {
+            const it = items.find(x => x.id === ciSelectedItemId);
+            const el = document.getElementById('ci-qty');
+            let v = parseInt(el.value, 10) || 1;
+            const max = it ? it.quantity : 1;
+            v = Math.max(1, Math.min(max, v + d));
+            el.value = v;
+        }
+
+        function transmitItem() {
+            const it = items.find(x => x.id === ciSelectedItemId);
+            if (!it) return showNotification('SELECT AN ITEM FROM YOUR LOADOUT.');
+            const qty = Math.max(1, Math.min(it.quantity, parseInt(document.getElementById('ci-qty').value, 10) || 1));
+            const c = contactByUid(contactUidTarget);
+            if (!c) return closeModals();
+            showCustomPrompt('TRANSMIT ' + it.name + ' x' + qty + ' TO ' + c.name + '? IT LEAVES YOUR INVENTORY NOW.', [
+                {
+                    label: 'TRANSMIT',
+                    action: () => {
+                        // MOVE: escrow the goods at transmit time (auto-refunded if DECLINED)
+                        it.quantity -= qty;
+                        if (it.quantity <= 0) items.splice(items.indexOf(it), 1);
+                        saveToStorage();
+                        renderInventory(currentInvTab);
+                        queueMail(c.uid, 'item', { name: it.name, type: it.type, effects: it.effects, quantity: qty }, 'ITEM: ' + it.name + ' x' + qty);
+                        closeModals();
+                        notifyTxResult();
+                    }
+                },
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+
+        function renderMail() {
+            const el = document.getElementById('mail-container');
+            if (!el) return;
+            let html = '';
+            // INBOX
+            html += '<h3 style="border-bottom:2px solid var(--pip-color); padding-bottom:5px; margin-bottom:10px;">INCOMING TRANSMISSIONS</h3>';
+            const inKeys = Object.keys(inboxLetters).sort((a, b) => (inboxLetters[b].ts || 0) - (inboxLetters[a].ts || 0));
+            if (!inKeys.length) {
+                html += '<p style="opacity:0.5; margin-bottom:20px;">NO PENDING TRANSMISSIONS.</p>';
+            } else {
+                inKeys.forEach(k => {
+                    const l = inboxLetters[k];
+                    html += '<div class="item-row" onclick="openMailItem(\'' + k + '\')"><div class="item-info"><div>' + escapeHtml(typeSummary(l)) + '</div><div class="item-effects">FROM: ' + escapeHtml(l.fromName || 'UNKNOWN') + ' — ' + new Date(l.ts || Date.now()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) + '</div></div><div class="item-qty">&gt;</div></div>';
+                });
+            }
+            // UNVERIFIED QUARANTINE
+            const uKeys = Object.keys(unverifiedLetters);
+            if (uKeys.length) {
+                html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:20px 0 10px; opacity:0.8;">QUARANTINE (' + uKeys.length + ')</h3>';
+                html += '<p style="font-size:0.9rem; opacity:0.7; margin-bottom:10px;">FROM UNLINKED FREQUENCIES. SCAN THE SENDER\'S DATACARD TO UNLOCK.</p>';
+                uKeys.forEach(k => {
+                    const l = unverifiedLetters[k];
+                    html += '<div class="item-row" style="opacity:0.6; cursor:default;"><div class="item-info"><div>UNTRUSTED: ' + escapeHtml((l.type || '???').toUpperCase()) + '</div><div class="item-effects">CLAIMS TO BE: ' + escapeHtml(l.fromName || 'UNKNOWN') + '</div></div><div class="item-qty">?</div></div>';
+                });
+            }
+            // OUTBOX
+            html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:20px 0 10px; opacity:0.8;">OUTBOX</h3>';
+            if (!outbox.length) {
+                html += '<p style="opacity:0.5; margin-bottom:20px;">NOTHING SENT.</p>';
+            } else {
+                [...outbox].reverse().slice(0, 30).forEach(e => {
+                    const c = contactByUid(e.to);
+                    html += '<div class="item-row" style="cursor:default;"><div class="item-info"><div>' + escapeHtml(e.summary) + ' → ' + escapeHtml(c ? c.name : e.to) + '</div><div class="item-effects">STATUS: ' + escapeHtml(statusLabel(e)) + '</div></div><button class="theme-btn" onclick="clearOutboxEntry(\'' + e.id + '\')">[CLEAR]</button></div>';
+                });
+            }
+            // TRANSMISSION LOG
+            html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:20px 0 10px; opacity:0.8;">TRANSMISSION LOG</h3>';
+            if (!mailLog.length) {
+                html += '<p style="opacity:0.5;">LOG EMPTY.</p>';
+            } else {
+                mailLog.slice(0, 30).forEach(m => {
+                    html += '<div style="border-bottom:1px dashed var(--pip-color-dim); padding:6px 0; font-size:1rem;"><span style="opacity:0.7;">' + (m.dir === 'in' ? 'FROM' : 'TO') + ' ' + escapeHtml(m.name) + ':</span> ' + escapeHtml(m.text) + '</div>';
+                });
+            }
+            el.innerHTML = html;
+        }
+
+        function statusLabel(e) {
+            switch (e.status) {
+                case 'queued': return 'QUEUED (NO SIGNAL)';
+                case 'sending': return 'TRANSMITTING...';
+                case 'sent': return 'AWAITING RESPONSE';
+                case 'accepted': return 'ACCEPTED ✓';
+                case 'declined': return e.refunded ? 'DECLINED ✗ (RETURNED)' : 'DECLINED ✗';
+                case 'fulfilled': return 'CONTRACT FULFILLED ✓';
+                case 'closed': return 'LINK CLOSED';
+            }
+            return (e.status || '???').toUpperCase();
+        }
+
+        function clearOutboxEntry(id) {
+            const idx = outbox.findIndex(e => e.id === id);
+            if (idx === -1) return;
+            const e = outbox[idx];
+            if (e.key && window.db) {
+                window.firebaseRemove(window.firebaseRef(window.db, 'mail/' + e.to + '/' + e.key)).catch(() => {});
+            }
+            outbox.splice(idx, 1);
+            saveComms();
+            renderMail();
+        }
+
+        // --- MAP STICKY-SELECT (tap a wastelander beacon) ---
+        function selectBeacon(uid) {
+            selectedBeaconUid = safeUid(uid);
+            updateMapUserCard();
+        }
+        function deselectBeacon() {
+            selectedBeaconUid = null;
+            const card = document.getElementById('map-user-card');
+            if (card) card.style.display = 'none';
+        }
+        function updateMapUserCard() {
+            const card = document.getElementById('map-user-card');
+            if (!card) return;
+            const uid = selectedBeaconUid;
+            if (!uid) { card.style.display = 'none'; return; }
+            const b = lastKnownBeaconData[uid];
+            const contact = contactByUid(uid);
+            const name = contact ? contact.name : ((b && b.name) ? b.name : 'UNKNOWN SIGNAL');
+            let info;
+            if (b && b.timestamp) {
+                const m = Math.floor((Date.now() - b.timestamp) / 60000);
+                info = m < 5 ? 'LIVE SIGNAL' : ('LKL ' + m + 'M AGO');
+                if (myLastLat !== null) {
+                    const d = getDistance(myLastLat, myLastLng, b.lat, b.lng);
+                    info += ' | ' + (d < 1000 ? Math.round(d) + 'M AWAY' : ((d / 1000).toFixed(1) + 'KM AWAY'));
+                } else {
+                    info += ' | YOUR GPS OFFLINE';
+                }
+            } else {
+                info = 'SIGNAL LOST';
+            }
+            document.getElementById('muc-name').innerText = name;
+            document.getElementById('muc-info').innerText = info;
+            const actions = document.getElementById('muc-actions');
+            if (contact) {
+                actions.innerHTML =
+                    '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'msg\', \'' + uid + '\')">[ MSG ]</button>' +
+                    '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'quest\', \'' + uid + '\')">[ QUEST ]</button>' +
+                    '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'item\', \'' + uid + '\')">[ ITEM ]</button>';
+            } else {
+                actions.innerHTML = '<div style="font-size:0.9rem; opacity:0.8; width:100%;">NOT IN WASTELANDERS MET — SCAN THEIR DATACARD TO CONNECT</div>';
+            }
+            card.style.display = 'block';
+        }
+
+        // --- COMMS BOOT: listener + outbox flush, with retry until Firebase is up ---
+        let commsBootRetries = 0;
+        function initComms() {
+            if (window.db) {
+                startMailListener();
+                flushOutbox();
+                refreshOutboxStatuses();
+                renderMailBadge();
+            } else if (commsBootRetries < 40) {
+                commsBootRetries++;
+                setTimeout(initComms, 2500);
+            }
+        }
+        window.addEventListener('online', () => { flushOutbox(); refreshOutboxStatuses(); });
+        setInterval(() => { flushOutbox(); refreshOutboxStatuses(); }, 20000);
+        renderMailBadge();
+        initComms();
+
+        // ==================== PWA INSTALL PIPELINE (v0.32) ====================
+        // Root cause of "install did nothing on Chrome": the WebAPK minting pipeline is
+        // silent and slow (up to a minute), AND our manifest under-declared icons
+        // (single entry, mislabeled 512 while the file was 1024) suppressed Chrome's
+        // automatic install surfaces. Now fixed at the manifest, and this button gives
+        // one-tap install where the browser offers it, clear instructions elsewhere.
+        let deferredInstallPrompt = null;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault(); // we surface OUR pre-boot button instead of the mini-infobar
+            deferredInstallPrompt = e;
+            updateInstallBtn();
+        });
+        window.addEventListener('appinstalled', () => {
+            deferredInstallPrompt = null;
+            updateInstallBtn();
+            showNotification('POX-BOY INSTALLED. LAUNCH THE HOME SCREEN ICON FOR FULL IMMERSION.');
+        });
+        function isIOSDevice() {
+            return /iPad|iPhone|iPod/.test(navigator.userAgent || '') ||
+                (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
+        }
+        function updateInstallBtn() {
+            const btn = document.getElementById('pb-install-btn');
+            if (!btn) return;
+            // Meaningless once installed (WebAPK standalone/fullscreen, or iOS home screen)
+            if (getDisplayMode() !== 'browser') { btn.style.display = 'none'; return; }
+            btn.style.display = '';
+        }
+        async function installApp() {
+            if (deferredInstallPrompt) {
+                try {
+                    deferredInstallPrompt.prompt();
+                    const choice = await deferredInstallPrompt.userChoice.catch(() => null);
+                    if (choice && choice.outcome === 'accepted') {
+                        showNotification('INSTALL ACCEPTED. THE APP ICON CAN TAKE UP TO A MINUTE TO APPEAR ON YOUR HOME SCREEN — THAT WAIT IS NORMAL.');
+                    }
+                } catch (e) {}
+                deferredInstallPrompt = null;
+                updateInstallBtn();
+                return;
+            }
+            // No capturable prompt available: hand-hold through the manual route
+            if (isIOSDevice()) {
+                showNotification('iOS INSTALL: TAP SAFARI\'S SHARE ICON, THEN "ADD TO HOME SCREEN", THEN LAUNCH THE POX-BOY ICON.');
+            } else {
+                showNotification('MANUAL INSTALL: TAP THE BROWSER MENU (⋮) THEN "INSTALL APP" / "ADD TO HOME SCREEN". THE NEW ICON MAY TAKE A MINUTE TO APPEAR — WAIT FOR IT.');
+            }
+        }
+
+        // ---- HEADER BATTERY METER (Android/Chrome only; hidden where unsupported) ----
+        function initBattMeter() {
+            const el = document.getElementById('pip-batt');
+            if (!el) return;
+            if (!('getBattery' in navigator)) { el.style.display = 'none'; return; }
+            navigator.getBattery().then(b => {
+                el.style.display = 'block';
+                const upd = () => { el.innerText = 'PWR ' + Math.round(b.level * 100) + '%' + (b.charging ? '+' : ''); };
+                upd();
+                b.addEventListener('levelchange', upd);
+                b.addEventListener('chargingchange', upd);
+            }).catch(() => { el.style.display = 'none'; });
+        }
+
+        updateInstallBtn();
+        initBattMeter();
 
         renderQuests();
         initOnboarding();

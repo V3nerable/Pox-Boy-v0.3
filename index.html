@@ -9,6 +9,9 @@
     <!-- PWA Manifest & Icons -->
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="icon.png">
+    <!-- Pre-16.4 iOS home-screen mode + status bar theming -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     
     <!-- Leaflet Free Maps -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -23,7 +26,7 @@
     <!-- Firebase SDK (Live Tracking) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { getDatabase, ref, set, onValue, onDisconnect } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+        import { getDatabase, ref, set, get, remove, onValue, onDisconnect } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyD5Uczvj78XsIsykhlasSYaMcPBO2WNvxs",
@@ -41,6 +44,8 @@
         window.firebaseRef = ref;
         window.firebaseOnValue = onValue;
         window.firebaseOnDisconnect = onDisconnect;
+        window.firebaseGet = get;
+        window.firebaseRemove = remove;
     </script>
 </head>
 <body class="crt">
@@ -49,9 +54,10 @@
         <div style="display: flex; flex-direction: column;">
             <div style="display: flex; align-items: baseline; gap: 10px;">
                 <span class="header-title" id="main-os-title">POX-BOY 3026</span>
-                <span style="font-size: 0.8rem; opacity: 0.5;">v0.30</span>
+                <span style="font-size: 0.8rem; opacity: 0.5;">v0.32</span>
             </div>
             <span id="pip-clock" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px;"></span>
+            <span id="pip-batt" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px; display: none;"></span>
         </div>
         <div class="header-controls">
             <button class="theme-btn" onclick="toggleFullscreen()" id="fs-btn">[FULLSCREEN]</button>
@@ -137,7 +143,10 @@
 
         <!-- ================= INV TAB ================= -->
         <div id="tab-inv" class="tab-content">
-            <button class="theme-btn" onclick="startQRScanner()" style="width: 100%; border-style: dashed; font-size: 1.2rem; margin-bottom: 15px; padding: 10px;">[SCAN P2P DATA TRANSFER]</button>
+            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                <button class="theme-btn" onclick="startQRScanner()" style="flex: 1; border-style: dashed; font-size: 1.1rem; padding: 10px;">[SCAN TRANSFER]</button>
+                <button class="theme-btn" onclick="openDatacard()" style="flex: 1; border-style: dashed; font-size: 1.1rem; padding: 10px;">[MY DATACARD]</button>
+            </div>
             <div class="sub-nav" id="inv-sub-nav">
                 <div class="sub-nav-item active" onclick="switchSubTab('inv', 'weapons')">WEAPONS</div>
                 <div class="sub-nav-item" onclick="switchSubTab('inv', 'apparel')">APPAREL</div>
@@ -150,9 +159,14 @@
 
         <!-- ================= DATA TAB ================= -->
         <div id="tab-data" class="tab-content">
-            <button class="theme-btn" onclick="startQRScanner()" style="width: 100%; border-style: dashed; font-size: 1.2rem; margin-bottom: 15px; padding: 10px;">[SCAN P2P DATA TRANSFER]</button>
-            <div class="sub-nav" id="data-sub-nav">
+            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                <button class="theme-btn" onclick="startQRScanner()" style="flex: 1; border-style: dashed; font-size: 1.1rem; padding: 10px;">[SCAN TRANSFER]</button>
+                <button class="theme-btn" onclick="openDatacard()" style="flex: 1; border-style: dashed; font-size: 1.1rem; padding: 10px;">[MY DATACARD]</button>
+            </div>
+            <div class="sub-nav" id="data-sub-nav" style="flex-wrap: wrap; column-gap: 15px; row-gap: 6px;">
                 <div class="sub-nav-item active" onclick="switchSubTab('data', 'quests')">QUESTS</div>
+                <div class="sub-nav-item" onclick="switchSubTab('data', 'wastelanders')">WASTELANDERS</div>
+                <div class="sub-nav-item" id="data-mail-navitem" onclick="switchSubTab('data', 'mail')">MAIL</div>
                 <div class="sub-nav-item" onclick="switchSubTab('data', 'factions')">FACTIONS</div>
                 <div class="sub-nav-item" onclick="switchSubTab('data', 'stats')">STATS</div>
             </div>
@@ -160,6 +174,21 @@
             <!-- QUESTS -->
             <div id="sub-data-quests" class="sub-tab-content active">
                 <!-- Dynamically populated by JS -->
+            </div>
+
+            <!-- WASTELANDERS MET (Rolodex) -->
+            <div id="sub-data-wastelanders" class="sub-tab-content">
+                <button class="theme-btn" onclick="openDatacard()" style="width: 100%; border-style: dashed; font-size: 1.2rem; margin-bottom: 15px; padding: 10px;">[BROADCAST MY DATACARD]</button>
+                <div id="wastelanders-list">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- MAIL (incoming / outbox / log) -->
+            <div id="sub-data-mail" class="sub-tab-content">
+                <div id="mail-container">
+                    <!-- Populated by JS -->
+                </div>
             </div>
             
             <!-- FACTIONS -->
@@ -182,8 +211,21 @@
         <!-- ================= MAP TAB ================= -->
         <div id="tab-map" class="tab-content">
             <div class="split-view">
-                <div class="split-main">
+                <div class="split-main" style="position: relative;">
                     <div id="map-container"></div>
+                    <!-- Sticky-select wastelander info card (tap a beacon) -->
+                    <div id="map-user-card" style="display: none; position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 1000; background: rgba(5, 16, 5, 0.95); border: 2px solid var(--pip-color); box-shadow: 0 0 12px var(--pip-color-dim); padding: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                            <div style="min-width: 0;">
+                                <div id="muc-name" style="font-weight: bold; font-size: 1.3rem;">WASTELANDER</div>
+                                <div id="muc-info" style="font-size: 0.95rem; opacity: 0.8; margin-top: 2px;">--</div>
+                            </div>
+                            <button class="theme-btn" onclick="deselectBeacon()" style="flex-shrink: 0; margin-left: 10px;">[X]</button>
+                        </div>
+                        <div id="muc-actions" style="display: flex; gap: 8px; margin-top: 10px;">
+                            <!-- Injected by JS (contact-gated) -->
+                        </div>
+                    </div>
                 </div>
                 <div class="split-controls">
                     <h2 class="landscape-only">MAP TOOLS</h2>
@@ -309,6 +351,87 @@
             <div style="width: 100%; height: 10px; border: 1px solid var(--pip-color); background: var(--pip-bg); margin-top: 2px;">
                 <div style="height: 100%; background-color: var(--pip-color); width: 100%; box-shadow: 0 0 5px var(--pip-color);"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- MY DATACARD MODAL (v0.31) -->
+    <div id="datacard-modal" class="modal-overlay" style="z-index: 120; background: var(--pip-bg);">
+        <div class="modal-content" style="text-align: center; width: 100%; max-width: 420px;">
+            <h3>MY DATACARD</h3>
+            <p id="datacard-name" style="font-size: 1.5rem; font-weight: bold; margin-bottom: 15px;">UNKNOWN</p>
+            <p style="font-size: 0.95rem; opacity: 0.8; margin-bottom: 15px;">Have a Wastelander scan this to link frequencies and receive transmissions.</p>
+            <div id="datacard-qr-canvas" style="background: white; padding: 15px; border-radius: 10px; display: inline-block; box-shadow: 0 0 20px var(--pip-color); line-height: 0;"></div>
+            <button class="pip-btn" onclick="closeModals()" style="margin-top: 20px; border-style: dashed;">CLOSE DATACARD</button>
+        </div>
+    </div>
+
+    <!-- CONTACT SHEET MODAL -->
+    <div id="contact-modal" class="modal-overlay" style="z-index: 120;">
+        <div class="modal-content">
+            <h3 id="contact-name">WASTELANDER</h3>
+            <p id="contact-meta" style="opacity: 0.8; font-size: 0.95rem; margin-bottom: 20px;"></p>
+            <button class="pip-btn" onclick="composeTo('msg')" style="border-style: dashed;">[ MESSAGE ]</button>
+            <button class="pip-btn" onclick="composeTo('quest')" style="border-style: dashed;">[ SEND QUEST ]</button>
+            <button class="pip-btn" onclick="composeTo('item')" style="border-style: dashed;">[ SEND ITEM ]</button>
+            <div style="display: flex; gap: 10px; margin-top: 15px;">
+                <button class="pip-btn" onclick="removeActiveContact()" style="flex: 1; border-color: #ff3333; color: #ff3333;">REMOVE CONTACT</button>
+                <button class="pip-btn" onclick="closeModals()" style="flex: 1; border-style: dashed;">CLOSE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- COMPOSE QUEST MODAL -->
+    <div id="compose-quest-modal" class="modal-overlay" style="z-index: 125;">
+        <div class="modal-content" style="max-height: 90vh; overflow-y: auto;">
+            <h3 id="cq-title">TRANSMIT QUEST</h3>
+            <div class="form-group"><label>QUEST TITLE</label><input type="text" id="cq-name" class="pip-input vk-target" readonly onclick="openVk('cq-name')" placeholder="e.g. Recover the Water Chip"></div>
+            <div class="form-group"><label>BRIEF (OPTIONAL)</label><input type="text" id="cq-brief" class="pip-input vk-target" readonly onclick="openVk('cq-brief')" placeholder="One-line briefing..."></div>
+            <div class="form-group"><label>OBJECTIVES (3 MAX)</label>
+                <input type="text" id="cq-obj1" class="pip-input vk-target" readonly onclick="openVk('cq-obj1')" placeholder="Objective 1" style="margin-bottom: 5px;">
+                <input type="text" id="cq-obj2" class="pip-input vk-target" readonly onclick="openVk('cq-obj2')" placeholder="Objective 2 (optional)" style="margin-bottom: 5px;">
+                <input type="text" id="cq-obj3" class="pip-input vk-target" readonly onclick="openVk('cq-obj3')" placeholder="Objective 3 (optional)">
+            </div>
+            <div class="form-group"><label>REWARD (OPTIONAL)</label><input type="text" id="cq-reward" class="pip-input vk-target" readonly onclick="openVk('cq-reward')" placeholder="e.g. 2 Drink Tickets"></div>
+            <div class="form-group"><label>TIME LIMIT</label>
+                <select id="cq-limit" class="pip-input">
+                    <option value="0">NO LIMIT</option>
+                    <option value="30">30 MINUTES</option>
+                    <option value="60">1 HOUR</option>
+                    <option value="120">2 HOURS</option>
+                </select>
+            </div>
+            <button class="pip-btn" onclick="transmitQuest()">[ TRANSMIT QUEST ]</button>
+            <button class="pip-btn" onclick="closeModals()" style="margin-top: 15px; border-style: dashed;">CANCEL</button>
+        </div>
+    </div>
+
+    <!-- COMPOSE MESSAGE MODAL -->
+    <div id="compose-msg-modal" class="modal-overlay" style="z-index: 125;">
+        <div class="modal-content">
+            <h3 id="cm-title">TRANSMIT MESSAGE</h3>
+            <div class="form-group"><label>MESSAGE</label><input type="text" id="cm-text" class="pip-input vk-target" readonly onclick="openVk('cm-text')" placeholder="EYES UP. MOVEMENT AT THE RIDGE."></div>
+            <button class="pip-btn" onclick="transmitMsg()">[ SEND TRANSMISSION ]</button>
+            <button class="pip-btn" onclick="closeModals()" style="margin-top: 15px; border-style: dashed;">CANCEL</button>
+        </div>
+    </div>
+
+    <!-- COMPOSE ITEM MODAL -->
+    <div id="compose-item-modal" class="modal-overlay" style="z-index: 125;">
+        <div class="modal-content" style="max-height: 90vh; overflow-y: auto;">
+            <h3 id="ci-title">TRANSMIT ITEM</h3>
+            <div class="form-group"><label>SELECT ITEM FROM LOADOUT</label>
+                <div id="ci-item-list" style="max-height: 35vh; overflow-y: auto; border: 1px dashed var(--pip-color-dim);"></div>
+            </div>
+            <div class="form-group"><label>QUANTITY</label>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <button class="theme-btn" onclick="ciStep(-1)" style="font-size: 1.4rem; padding: 5px 12px;">-</button>
+                    <input type="text" id="ci-qty" class="pip-input" value="1" readonly style="text-align: center; cursor: default;">
+                    <button class="theme-btn" onclick="ciStep(1)" style="font-size: 1.4rem; padding: 5px 12px;">+</button>
+                </div>
+            </div>
+            <p style="font-size: 0.9rem; opacity: 0.7; margin-bottom: 10px;">WARNING: ITEM LEAVES YOUR INVENTORY ON TRANSMIT (RETURNED IF DECLINED).</p>
+            <button class="pip-btn" onclick="transmitItem()">[ TRANSMIT ITEM ]</button>
+            <button class="pip-btn" onclick="closeModals()" style="margin-top: 15px; border-style: dashed;">CANCEL</button>
         </div>
     </div>
 
@@ -642,7 +765,7 @@
     <div id="pre-boot-overlay" class="modal-overlay" style="z-index: 250; background: var(--pip-bg); flex-direction: column; display: none;">
         <!-- Version Tag & Dev Skip Button -->
         <div style="position: absolute; top: 10px; right: 10px; z-index: 260; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-            <span style="font-size: 0.8rem; opacity: 0.5;">v0.30</span>
+            <span style="font-size: 0.8rem; opacity: 0.5;">v0.32</span>
             <button class="pip-btn" onclick="devSkipToApp()" style="font-size: 0.7rem; padding: 2px 5px; border: none; color: #ff3333; opacity: 0.5;">[DEV: FAST BOOT]</button>
         </div>
         
@@ -656,15 +779,16 @@
                 <button class="pip-btn" id="pb-size-btn" onclick="cycleSize()" style="font-size: 1.4rem;">[2] SCREEN PADDING: SHRINK 2</button>
                 <button class="pip-btn" id="pb-perm-btn" onclick="primeDevicePermissions()" style="font-size: 1.4rem;">[3] AUTHORIZE SATELLITE & OPTICS</button>
                 <div id="pb-perm-status" style="display: none; font-size: 1rem; text-align: left; border: 1px dashed var(--pip-color-dim); padding: 8px; line-height: 1.3;"></div>
+                <button class="pip-btn" id="pb-install-btn" onclick="installApp()" style="font-size: 1.4rem; display: none;">[4] INSTALL APP</button>
             </div>
             
-            <button class="pip-btn" onclick="startBootSequence()" style="font-size: 1.6rem; font-weight: bold; border-style: dashed; padding: 15px;">[4] COMMENCE LOGON</button>
+            <button class="pip-btn" onclick="startBootSequence()" style="font-size: 1.6rem; font-weight: bold; border-style: dashed; padding: 15px;">[5] COMMENCE LOGON</button>
         </div>
     </div>
 
     <!-- BOOT SPLASH SCREEN -->
     <div id="boot-splash" class="modal-overlay" style="z-index: 200; background: var(--pip-bg); flex-direction: column; display: flex;">
-        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.30</span>
+        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.32</span>
         <div class="crt" style="position: absolute; top:0; left:0; right:0; bottom:0; pointer-events: none; z-index: 201;"></div>
         <div style="z-index: 202; width: 100%; max-width: 600px; padding: 20px; text-align: left; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; justify-content: flex-end;" id="boot-text-container">
             <p id="boot-log-1" style="margin-bottom: 5px; display: none; font-size: 1rem;">ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM</p>

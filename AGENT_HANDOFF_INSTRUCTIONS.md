@@ -42,3 +42,47 @@ Please review `IDEAS_LOG.md` in this directory. The user intends to implement th
 *   **v0.28:** Global CRT enclosure REMOVED per user request (element + CSS deleted; body regained its original class="crt" scanlines/flicker). Databank tiles fixed: dropped `loading="lazy"` (WebKit lazy-load quirk inside scroll panes = blank tiles) and replaced `aspect-ratio` with fixed 90px tile height (aspect-ratio unsupported on older iOS collapsed tiles to zero height). Theme tint vars (--pip-rgb/--cam-filter/--tile-filter) retained for marker/camera/QR/map tinting.
 *   **v0.29:** Radar staleness cap -- Firebase listener skips drawing any other-player beacon whose timestamp is missing or older than 24h (LKL labels for fresh beacons unchanged). G.O.A.T. exam is now the SOLE S.P.E.C.I.A.L. allocator: each answer awards +2 to both listed stats (cap 10; ~27 total points vs old 28), Q5 commits userProfile.special and jumps straight to trait select; manual assignment screen (obStep 5), obPoints and adjustObSpecial() deleted; answer labels now read "(+2 STR, +2 AGI)" style.
 *   **v0.30:** Boot-time HARDWARE AUTHORIZATION: new `[3] AUTHORIZE SATELLITE & OPTICS` step on the pre-boot calibration screen runs `primeDevicePermissions()` -- one-shot geolocation fix, a camera getUserMedia whose tracks are immediately stopped (permission primed, hardware released), and Notification.requestPermission (guarded for API-less devices). A live in-universe status block prints OK/DENIED/UNAVAILABLE per system; ends with restoreFullscreenIfDesired() so the Android popup chain can't strand the user out of fullscreen. Rationale: each native prompt can only fire once per origin, so burning all three during boot guarantees zero immersion-breaking popups mid-game. Commence Logon renumbered to [4].
+*   **v0.31:** P2P COMMS STACK (Rolodex + Firebase mailbox). IDENTITY: `pipboy-uid` now minted at boot (was GPS-gated); `[MY DATACARD]` buttons (INV/DATA) + WASTELANDERS tab broadcast a plain-text QR `poxboy:{uid}:{name}` (NOT JSON). SCANNER: `onScanSuccess` routes any `poxboy:` plain-text to `handleDatacardScan` BEFORE the legacy JSON parse (TRADE_ITEM / SHARE_QUEST QR flows untouched). ROLODEX: `pipboy-rolodex` localStorage {uid,name,metAt}; DATA sub-tab WASTELANDERS lists contacts (presence read from `lastKnownBeaconData`); contact sheet has [MESSAGE]/[SEND QUEST]/[SEND ITEM]/REMOVE — SEND GATED: you can only transmit to scanned contacts. HANDSHAKE (one-scan mutual link): scanning a datacard locally adds them AND queues `{type:'handshake'}` into their mailbox; recipient gets ACCEPT LINK/IGNORE prompt (from unknowns this is the ONE cold-message allowed — it proves physical card-showing); mutual-scan letters auto-retire. MAILBOX: Firebase node `mail/{recipientUid}/{key}` letters {type:msg|quest|item|handshake, from, fromName, ts, payload}; receiver listens via firebaseOnValue on own uid (same pattern as wastelanders/). Accept/decline writes field-level flags (claimed/declined/fulfilled) onto the letter, then marks key processed (`pipboy-mail-processed`); sender's outbox lazily `firebaseGet`s sent letters on MAIL open / online event / 20s ticker (added `firebaseGet`/`firebaseRemove` to the index.html module imports). Outbox lives in `pipboy-outbox`, flushes on boot/online/ticker; statuses: QUEUED → AWAITING → ACCEPTED ✓ / DECLINED ✗ / CONTRACT FULFILLED ✓ / LINK CLOSED; [CLEAR] removes the Firebase letter + entry. ITEM POLICY = MOVE: quantity escrowed at transmit, auto-REFUNDED if declined (refundItemPayload). QUESTS: composer (title/brief/3 objectives/reward/30m-2h timer), accepted quests land in quests[] as type CONTRACT, giver = sender name, brief+reward injected as objective lines, `contractKey` stored so completing the quest writes fulfilled:true back for the giver. MSGS: stored to `pipboy-maillog` TRANSMISSION LOG (both dirs, cap 100). QUARANTINE: non-handshake mail from unknown uids renders in a collapsed UNVERIFIED section (type + claimed name only, payload never shown) and auto-promotes into the inbox when the sender is later scanned/linked. MAP STICKY-SELECT: tapping a wastelander beacon pins `#map-user-card` (name, LIVE/LKL age, haversine distance if own GPS on) with contact-gated MSG/QUEST/ITEM buttons or "SCAN DATACARD TO CONNECT"; map-tap or [X] deselects; card live-refreshes on each beacon snapshot; marker clicks stopPropagation so map-click-deselect doesn't fire. All peer-supplied strings pass escapeHtml before innerHTML. `pipboy-mail-seen` (capped 500) stops re-notifying on snapshot repeats; processed-flagged letters purge from Firebase after 2h if the sender never cleared them. Overseer map pins deliberately deferred (queued next).
+*   **v0.32:** PWA INSTALL FIX + header battery + persisted padding/accessibility. INSTALL ROOT CAUSE (attendee reports "Chrome install did nothing"): (a) manifest declared a single icon at "512x512" while icon.png was actually 1024x1024 -- size mismatch plus the missing required 192px entry suppressed Chrome's automatic install surfaces (mini-infobar / "Install app" menu item); (b) Android WebAPK minting is server-side and silent for up to ~1 minute, so "nothing happened" was actually the APK being generated -- the friend later installing "an APK with another installer" WAS the WebAPK arriving. FIXES: real `icon-192.png` + `icon-512.png` generated from the 1024 master (icon.png kept for apple-touch-icon); manifest now declares 192(any) + 512(any) + 512(maskable); sw.js precaches both new icons. New `[4] INSTALL APP` button on the pre-boot screen (COMMENCE LOGON renumbered [5]): `beforeinstallprompt` is captured and replayed via `installApp()`; button hides itself when display-mode is not 'browser' (already installed) and falls back to iOS Share->Add-to-Home-Screen or manual-browser-menu notifications when no capturable prompt exists; `appinstalled` confirms via showNotification. HEADER: `pip-batt` span under pip-clock, fed by navigator.getBattery() (Android/Chrome) -- permanently hidden where the API is missing (iOS); shows `PWR NN%` (+charge bolt flag). PADDING: `pipboy-size-index` now persists; installed PWAs default to MAX, browser tabs keep SHRINK 2; both size buttons sync labels at boot. APPLE METAS: apple-mobile-web-app-capable + status-bar-style black-translucent (pre-16.4 iOS home-screen mode). DIRECTIVE CHANGE (v0.32 onward): CORE_DIRECTIVES #9 -- deploy replies = detailed point-by-point breakdown THEN one-line-per-item TL;DR.
+
+## 6. Firebase Realtime Database Rules (publish in console; NOT shipped in the zip)
+Paste into Firebase Console > Realtime Database > Rules > Publish. Scopes access to the two
+nodes the app uses, validates every write's shape/size, denies everything else. Field-level
+flag writes (claimed/declined/fulfilled on mail letters) pass these validators.
+```json
+{
+  "rules": {
+    "wastelanders": {
+      ".read": true,
+      "$uid": {
+        ".write": true,
+        ".validate": "newData.hasChildren(['name', 'lat', 'lng', 'timestamp'])",
+        "name":      { ".validate": "newData.isString() && newData.val().length <= 24" },
+        "lat":       { ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90" },
+        "lng":       { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+        "timestamp": { ".validate": "newData.isNumber() && newData.val() > 1735689600000" },
+        "$other":    { ".validate": false }
+      }
+    },
+    "mail": {
+      ".read": true,
+      "$uid": {
+        "$mailKey": {
+          ".write": true,
+          ".validate": "newData.hasChildren(['type', 'from', 'fromName', 'ts', 'payload'])",
+          "type":      { ".validate": "newData.isString() && (newData.val() == 'msg' || newData.val() == 'quest' || newData.val() == 'item' || newData.val() == 'handshake')" },
+          "from":      { ".validate": "newData.isString() && newData.val().length <= 64" },
+          "fromName":  { ".validate": "newData.isString() && newData.val().length <= 32" },
+          "ts":        { ".validate": "newData.isNumber() && newData.val() > 1735689600000" },
+          "payload":   { ".validate": true },
+          "claimed":   { ".validate": "newData.isBoolean()" },
+          "declined":  { ".validate": "newData.isBoolean()" },
+          "fulfilled": { ".validate": "newData.isBoolean()" },
+          "$other":    { ".validate": false }
+        }
+      }
+    },
+    "$other": { ".read": false, ".write": false }
+  }
+}
+```
