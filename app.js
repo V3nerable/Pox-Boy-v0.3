@@ -3374,33 +3374,44 @@
             });
         }
 
-        // --- COMPOSERS (contact-gated: you can only transmit to scanned contacts) ---
+        // --- COMPOSERS ---
+        // v0.37: MSG (+DATACARD via map card) is open to ANY beacon signal -- cold-send
+        // restored. QUEST/ITEM stay contact-gated (contracts and item escrow need a link).
+        // Unlinked recipients quarantine the letter as UNVERIFIED on their end (v0.31/0.34).
+        function composeTargetInfo(uid) {
+            if (!uid) return null;
+            const c = contactByUid(uid);
+            if (c) return { uid: c.uid, name: c.name, linked: true };
+            const b = lastKnownBeaconData[uid];
+            return { uid: uid, name: (b && b.name) ? b.name : 'UNKNOWN SIGNAL', linked: false };
+        }
         function composeTo(kind, uidOverride) {
             const uid = uidOverride || contactUidTarget;
-            const c = contactByUid(uid);
-            if (!c) { showNotification('NO CONTACT SELECTED.'); return; }
-            contactUidTarget = uid;
+            const t = composeTargetInfo(uid);
+            if (!t) { showNotification('NO TARGET SELECTED.'); return; }
+            if ((kind === 'quest' || kind === 'item') && !t.linked) { showNotification('SCAN THEIR DATACARD FIRST -- CONTRACTS AND ITEMS NEED A LINK.'); return; }
+            contactUidTarget = t.uid;
             closeModals();
             if (kind === 'msg') {
-                document.getElementById('cm-title').innerText = 'MESSAGE TO: ' + c.name;
+                document.getElementById('cm-title').innerText = 'MESSAGE TO: ' + t.name + (t.linked ? '' : ' (UNLINKED)');
                 document.getElementById('cm-text').value = '';
                 document.getElementById('compose-msg-modal').style.display = 'flex';
             } else if (kind === 'quest') {
-                document.getElementById('cq-title').innerText = 'QUEST TO: ' + c.name;
+                document.getElementById('cq-title').innerText = 'QUEST TO: ' + t.name;
                 ['cq-name','cq-brief','cq-obj1','cq-obj2','cq-obj3','cq-reward','cq-loc','cq-time'].forEach(id => { document.getElementById(id).value = ''; });
                 document.getElementById('compose-quest-modal').style.display = 'flex';
             } else if (kind === 'item') {
-                openItemComposer(c);
+                openItemComposer(contactByUid(t.uid));
             }
         }
 
         function transmitMsg() {
             const text = document.getElementById('cm-text').value.trim();
             if (!text) return showNotification('MESSAGE CANNOT BE EMPTY.');
-            const c = contactByUid(contactUidTarget);
-            if (!c) return closeModals();
-            queueMail(c.uid, 'msg', { text: text.toUpperCase() }, 'MESSAGE');
-            mailLog.unshift({ dir: 'out', uid: c.uid, name: c.name, text: text.toUpperCase(), ts: Date.now() });
+            const t = composeTargetInfo(contactUidTarget); // v0.37: unlinked beacon targets allowed
+            if (!t) return closeModals();
+            queueMail(t.uid, 'msg', { text: text.toUpperCase() }, 'MESSAGE');
+            mailLog.unshift({ dir: 'out', uid: t.uid, name: t.name, text: text.toUpperCase(), ts: Date.now() });
             if (mailLog.length > 100) mailLog.pop();
             saveComms();
             closeModals();
@@ -3634,9 +3645,28 @@
                     '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'quest\', \'' + uid + '\')">[ QUEST ]</button>' +
                     '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'item\', \'' + uid + '\')">[ ITEM ]</button>';
             } else {
-                actions.innerHTML = '<div style="font-size:0.9rem; opacity:0.8; width:100%;">NOT IN WASTELANDERS MET — SCAN THEIR DATACARD TO CONNECT</div>';
+                // v0.37: cold-contact restored -- datacard (link request) + one-way message
+                // straight from the map card; quests/items still require a mutual scan.
+                actions.innerHTML =
+                    '<button class="theme-btn" style="flex:1;" onclick="sendDatacardToUid(\'' + uid + '\')">[ SEND DATACARD ]</button>' +
+                    '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'msg\', \'' + uid + '\')">[ MSG ]</button>' +
+                    '<div style="font-size:0.85rem; opacity:0.7; width:100%;">UNLINKED SIGNAL -- MSG ARRIVES UNVERIFIED THEIR END. SCAN THEIR DATACARD FOR CONTRACTS/ITEMS.</div>';
             }
             card.style.display = 'block';
+        }
+
+        // v0.37: transmit your datacard to ANY beacon signal from the map card
+        // (their link-request prompt = same as if they had scanned you physically).
+        function sendDatacardToUid(uid) {
+            const b = lastKnownBeaconData[uid];
+            const name = ((b && b.name) ? b.name : 'THIS SIGNAL').toUpperCase();
+            showCustomPrompt('TRANSMIT YOUR DATACARD TO ' + name + '? THEY WILL GET A LINK REQUEST JUST AS IF THEY SCANNED YOU.', [
+                {
+                    label: 'SEND DATACARD',
+                    action: () => { sendHandshake(uid); notifyTxResult(); renderLinkRequests(); }
+                },
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
         }
 
         // --- COMMS BOOT: listener + outbox flush, with retry until Firebase is up ---

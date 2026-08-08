@@ -211,6 +211,14 @@
         }
         
         .vk-btn { padding: 4px 0; margin: 0; min-width: 25px; flex-grow: 1; font-size: 1.2rem; }
+
+        /* v0.37 bottom-row fix: punctuation demoted to narrow fixed-share utility keys
+           (v0.35's uniform flex-grow:1 made : - , . boxes comically chunky), and the
+           SPACE/ENTER word keys get text that can never escape its box -- v0.35's 3x/2x
+           flex shares + 1.5rem portrait font pushed both words outside their borders
+           on narrow phones. Width reclaimed from the punct keys also enlarges ENTER. */
+        .vk-btn.vk-sm { flex-grow: 0; flex-shrink: 1; flex-basis: 34px; min-width: 28px; }
+        .vk-btn.vk-wide { overflow: hidden; white-space: nowrap; letter-spacing: 0; }
         
         @media (orientation: landscape) and (max-height: 600px) {
             .vk-btn { padding: 2px 0; font-size: 1rem; min-width: 20px;}
@@ -420,6 +428,10 @@
 @media (orientation: portrait) {
     #keyboard-modal .modal-content { max-width: 700px; }
     #keyboard-modal .vk-btn { padding: 14px 0 !important; font-size: 1.5rem !important; min-width: 28px; }
+    /* v0.37: word keys shrink their WORD to fit the box instead of spilling outside it;
+       punct utility keys stay a narrow fixed share so SPACE/ENTER get the width back */
+    #keyboard-modal .vk-btn.vk-wide { font-size: 1.05rem !important; }
+    #keyboard-modal .vk-btn.vk-sm { flex-basis: 38px; }
     #vk-keys { gap: 7px !important; }
     #vk-keys > div { gap: 6px !important; }
 }

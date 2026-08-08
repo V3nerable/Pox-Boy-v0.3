@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pipboy-cache-v25';
+const CACHE_NAME = 'pipboy-cache-v26';
 
 const urlsToCache = [
   './',
