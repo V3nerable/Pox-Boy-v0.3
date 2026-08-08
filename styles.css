@@ -429,9 +429,10 @@
     #keyboard-modal .modal-content { max-width: 700px; }
     #keyboard-modal .vk-btn { padding: 14px 0 !important; font-size: 1.5rem !important; min-width: 28px; }
     /* v0.37: word keys shrink their WORD to fit the box instead of spilling outside it;
-       punct utility keys stay a narrow fixed share so SPACE/ENTER get the width back */
+       punct utility keys stay a narrow fixed share so SPACE/ENTER get the width back.
+       v0.38: basis 38px -> 30px now that '?' makes it FIVE punct keys in the row. */
     #keyboard-modal .vk-btn.vk-wide { font-size: 1.05rem !important; }
-    #keyboard-modal .vk-btn.vk-sm { flex-basis: 38px; }
+    #keyboard-modal .vk-btn.vk-sm { flex-basis: 30px; }
     #vk-keys { gap: 7px !important; }
     #vk-keys > div { gap: 6px !important; }
 }

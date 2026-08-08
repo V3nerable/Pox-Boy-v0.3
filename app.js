@@ -1141,32 +1141,46 @@
         const bootOptSizeBtn = document.getElementById('options-size-btn');
         if (bootOptSizeBtn) bootOptSizeBtn.innerText = `[SIZE: ${sizeLabels[sizeIndex]}]`;
 
-        // ================= ORIENTATION LOCK (v0.36) =================
-        // AUTO = v0.33 behaviour: rotation follows the device, split layouts engage via
-        // media queries. PORTRAIT / LANDSCAPE = user-forced lock via the Screen Orientation
-        // API, persisted across launches. Android Chrome honours lock() -- most reliably
-        // when installed/fullscreen, so rejections are swallowed and re-applied on every
-        // fullscreenchange (the lock bites the moment immersion is available). iOS Safari
-        // exposes no lock() at all: feature guard fails, preference still persists and
-        // labels, rotation simply stays free. AUTO calls unlock() and is the undo path.
+        // ================= ORIENTATION LOCK (v0.36, hardened v0.38) =================
+        // AUTO = follow the device; PORTRAIT / LANDSCAPE = user-forced lock, persisted
+        // across launches. v0.38 FLAP FIX (user-reported "briefly flips portrait/
+        // landscape"): every fullscreenchange used to re-fire lock()/unlock() blindly --
+        // and the fullscreen autopilot re-enters immersion after EVERY native-popup
+        // wedge, so each recovery cycle re-snapped the rotation even when nothing had
+        // changed. The engine now tracks the mode actually in effect and never re-fires
+        // it; leaving immersion re-arms it (the OS releases locks on exit) so re-entry
+        // locks exactly once. iOS still has no lock(): guard no-ops, label still syncs.
         const orientationModes = ['auto', 'portrait', 'landscape'];
         const orientationLabels = ['AUTO', 'PORTRAIT', 'LANDSCAPE'];
         let orientationIndex = orientationModes.indexOf(localStorage.getItem('pipboy-orientation'));
         if (orientationIndex < 0) orientationIndex = 0;
+        let orientationAppliedMode = null; // what is verifiably in effect right now
 
-        function applyOrientationLock() {
-            if (screen.orientation && typeof screen.orientation.lock === 'function') {
-                if (orientationIndex === 0) {
-                    try { screen.orientation.unlock(); } catch (e) {}
-                } else {
-                    try {
-                        const p = screen.orientation.lock(orientationModes[orientationIndex]);
-                        if (p && p.catch) p.catch(function(){}); // rejected pre-fullscreen on some builds; fullscreenchange re-applies
-                    } catch (e) {}
-                }
-            }
+        function syncOrientationLabel() {
             const optOrientBtn = document.getElementById('options-orient-btn');
             if (optOrientBtn) optOrientBtn.innerText = `[ORIENTATION: ${orientationLabels[orientationIndex]}]`;
+        }
+
+        function applyOrientationLock() {
+            if (!(screen.orientation && typeof screen.orientation.lock === 'function')) { syncOrientationLabel(); return; }
+            const mode = orientationModes[orientationIndex];
+            const immersed = (typeof getFsElement === 'function' && getFsElement()) || getDisplayMode() !== 'browser';
+            if (!immersed) { orientationAppliedMode = null; syncOrientationLabel(); return; } // OS released any lock; re-arm for next immersion
+            if (mode === orientationAppliedMode) { syncOrientationLabel(); return; } // already in effect -- do NOT snap the screen again
+            if (mode === 'auto') {
+                try { screen.orientation.unlock(); } catch (e) {}
+                orientationAppliedMode = 'auto';
+            } else {
+                try {
+                    const p = screen.orientation.lock(mode);
+                    if (p && p.then) {
+                        p.then(function(){ orientationAppliedMode = mode; }, function(){ /* rejected outside immersion: stays armed, fullscreenchange retries */ });
+                    } else {
+                        orientationAppliedMode = mode;
+                    }
+                } catch (e) {}
+            }
+            syncOrientationLabel();
         }
 
         function cycleOrientation() {
@@ -1176,13 +1190,13 @@
             showNotification(`ORIENTATION: ${orientationLabels[orientationIndex]}${orientationIndex === 0 ? ' (FOLLOWS DEVICE)' : ' LOCKED'}`);
         }
 
-        // Re-apply the saved preference whenever immersion flips so a lock that was
-        // rejected outside fullscreen engages the instant fullscreen becomes available.
+        // Re-apply the saved preference whenever immersion flips -- ONE snap per change,
+        // not one per fullscreenchange event (that was the flap).
         ['fullscreenchange', 'webkitfullscreenchange'].forEach(function(evt) {
             document.addEventListener(evt, applyOrientationLock);
         });
 
-        applyOrientationLock(); // re-apply saved preference at boot + paint the button label
+        applyOrientationLock(); // boot: paint the label + engage the lock if already immersed
 
         // Inventory Logic
         function renderInventory(category) {
@@ -1276,6 +1290,10 @@
         function showCustomPrompt(text, buttons) {
             document.getElementById('cp-text').innerText = text;
             const btnContainer = document.getElementById('cp-buttons');
+            // v0.38: long button lists (e.g. mail recipient picker with a big rolodex)
+            // used to spill off-screen -- cap and scroll the stack instead
+            btnContainer.style.maxHeight = '50vh';
+            btnContainer.style.overflowY = 'auto';
             btnContainer.innerHTML = '';
             
             buttons.forEach(b => {
@@ -2088,6 +2106,12 @@
         let pipMap = null;
         let markersGroup = null;
         let otherPlayersGroup = null;
+        // v0.38: SHARED MAP PINS board -- any wastelander can broadcast a marker to every
+        // Pip-Boy on the satellite via the sharedpins/ node (same watch pattern as the
+        // wastelanders/ radar). Rendered as dashed diamonds, sender credited in the label,
+        // and pins older than 72h are skipped (outlive the weekend, die before the next).
+        let sharedPinsGroup = null;
+        let lastKnownSharedPins = {};
         let userMarker = null;
         let gpsWatchId = null;
         let liveTrackingEnabled = false;
@@ -2123,6 +2147,7 @@
 
             markersGroup = L.layerGroup().addTo(pipMap);
             otherPlayersGroup = L.layerGroup().addTo(pipMap);
+            sharedPinsGroup = L.layerGroup().addTo(pipMap); // v0.38 broadcast marker board
             renderMarkers();
             
             // Start listening to Firebase for other players
@@ -2176,7 +2201,38 @@
                     // Live-refresh the pinned card as beacons stream in
                     if (selectedBeaconUid) updateMapUserCard();
                 });
+
+                // v0.38: watch the shared pins board (read is open to everyone per rules)
+                const pinsRef = window.firebaseRef(window.db, 'sharedpins/');
+                window.firebaseOnValue(pinsRef, (snap) => { renderSharedPins(snap.val() || {}); }, () => {});
             }
+        }
+
+        // v0.38: draw every broadcast marker from every wastelander (72h staleness prune)
+        function renderSharedPins(data) {
+            lastKnownSharedPins = data || {};
+            if (!sharedPinsGroup) return;
+            sharedPinsGroup.clearLayers();
+            const now = Date.now();
+            const sharedIcon = L.divIcon({
+                className: 'custom-pip-marker',
+                html: '<div style="width: 12px; height: 12px; transform: rotate(45deg); border: 2px dashed var(--pip-color); background: transparent; box-shadow: 0 0 10px var(--pip-color-dim);"></div>',
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+            Object.keys(lastKnownSharedPins).forEach(key => {
+                const p = lastKnownSharedPins[key];
+                if (!p || typeof p.lat !== 'number' || typeof p.lng !== 'number') return;
+                if (!p.ts || (now - p.ts) > 72 * 60 * 60 * 1000) return; // stale: skip
+                const who = p.fromName ? (' — VIA ' + String(p.fromName).toUpperCase()) : '';
+                L.marker([p.lat, p.lng], {icon: sharedIcon, zIndexOffset: 500})
+                    .bindTooltip(String(p.label || 'SHARED MARKER').toUpperCase() + who, {
+                        permanent: true,
+                        direction: 'bottom',
+                        className: 'pip-tooltip'
+                    })
+                    .addTo(sharedPinsGroup);
+            });
         }
 
         function renderMarkers() {
@@ -2212,19 +2268,43 @@
             
             if (tempWpLat === null || tempWpLng === null) return;
 
-            waypoints.push({
+            const wp = {
                 id: Date.now(),
                 name: name.toUpperCase(),
                 lat: tempWpLat,
                 lng: tempWpLng,
                 discovered: false // By default, user-created waypoints can also be "discovered"
-            });
+            };
+            waypoints.push(wp);
 
             saveToStorage();
             if (document.getElementById('tab-map').classList.contains('active')) {
                 renderMarkers();
             }
             closeModals();
+            // v0.38: offer to sync the new marker out to every other Pip-Boy (opt-in per
+            // marker -- silent auto-broadcast of every scribble would flood the board)
+            showCustomPrompt('MARKER SAVED. BROADCAST "' + wp.name + '" TO ALL WASTELANDERS?', [
+                { label: 'SHARE WITH EVERYONE', action: () => broadcastWaypoint(wp) },
+                { label: 'KEEP PRIVATE', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+
+        // v0.38: push one marker onto the sharedpins/ board for every client to draw
+        function broadcastWaypoint(wp) {
+            if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- MARKER STAYS LOCAL.'); return; }
+            const key = 'p' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
+            const pin = {
+                label: String(wp.name || 'MARKER').toUpperCase().substring(0, 32),
+                lat: wp.lat,
+                lng: wp.lng,
+                from: myMailUid || 'ANON',
+                fromName: String(userProfile.name || 'UNKNOWN').toUpperCase().substring(0, 32),
+                ts: Date.now()
+            };
+            window.firebaseSet(window.firebaseRef(window.db, 'sharedpins/' + key), pin)
+                .then(() => showNotification('MARKER BROADCAST TO ALL WASTELANDERS.'))
+                .catch(() => showNotification('BROADCAST FAILED -- MARKER STAYS LOCAL.'));
         }
 
         function deleteWaypoint() {
@@ -2283,6 +2363,7 @@
                     markersGroup.removeLayer(userMarker);
                     userMarker = null;
                 }
+                if (selectedBeaconUid === myUid) deselectBeacon(); // v0.39: your dot is gone, so is its card
                 // Wipe our tracking data from Firebase so we disappear from other maps
                 if (window.db) {
                     window.firebaseSet(window.firebaseRef(window.db, 'wastelanders/' + myUid), null);
@@ -2298,9 +2379,11 @@
 
             btn.innerText = "[LOCATING SATELLITE...]";
             
+            // v0.39: plain pip dot -- no pulse, and the permanent YOU ARE HERE banner is
+            // GONE (it sat above every close-range beacon and ate their taps).
             const userIcon = L.divIcon({
                 className: 'custom-pip-marker',
-                html: `<div style="background-color: var(--pip-color); width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--pip-bg); box-shadow: 0 0 15px var(--pip-color); animation: pulse-border 1.5s infinite;"></div>`,
+                html: `<div style="background-color: var(--pip-color); width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--pip-bg); box-shadow: 0 0 10px var(--pip-color);"></div>`,
                 iconSize: [14, 14],
                 iconAnchor: [7, 7]
             });
@@ -2319,13 +2402,15 @@
                     btn.style.color = "var(--pip-bg)";
 
                     if (!userMarker) {
-                        userMarker = L.marker([lat, lng], {icon: userIcon, zIndexOffset: 1000})
-                            .bindTooltip("YOU ARE HERE", {
-                                permanent: true, 
-                                direction: 'top', 
-                                className: 'pip-tooltip'
-                            })
+                        // v0.39: z 800 = UNDER other beacons (z 900) so a wastelander
+                        // standing next to you wins the tap; tapping YOUR dot pins your
+                        // own card with the same sticky-select behavior as theirs.
+                        userMarker = L.marker([lat, lng], {icon: userIcon, zIndexOffset: 800})
                             .addTo(markersGroup);
+                        userMarker.on('click', (e) => {
+                            L.DomEvent.stopPropagation(e.originalEvent);
+                            selectBeacon(myUid);
+                        });
                         pipMap.setView([lat, lng], 16); 
                     } else {
                         userMarker.setLatLng([lat, lng]);
@@ -3522,6 +3607,18 @@
             ]);
         }
 
+        // v0.38: SEND NEW MESSAGE straight from the MAIL tab -- lists every linked
+        // contact (rolodex) as recipient buttons; tap one and the composer opens.
+        function openRecipientPicker() {
+            if (!rolodex.length) { showNotification('NO CONTACTS LINKED -- SCAN A DATACARD FIRST.'); return; }
+            const buttons = rolodex.map(c => ({
+                label: '✉ ' + c.name,
+                action: () => composeTo('msg', c.uid)
+            }));
+            buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
+            showCustomPrompt('SELECT RECIPIENT:', buttons);
+        }
+
         function renderMail() {
             const el = document.getElementById('mail-container');
             if (!el) return;
@@ -3639,7 +3736,11 @@
             document.getElementById('muc-name').innerText = name;
             document.getElementById('muc-info').innerText = info;
             const actions = document.getElementById('muc-actions');
-            if (contact) {
+            // v0.39: tapping YOUR OWN dot pins the same card -- status line only, no
+            // self-addressed comms buttons (datacard/link requests to yourself are nonsense)
+            if (uid === myMailUid) {
+                actions.innerHTML = '<div style="font-size:0.85rem; opacity:0.7; width:100%;">THIS IS YOUR LIVE SIGNAL -- OTHER WASTELANDERS SEE THIS DOT.</div>';
+            } else if (contact) {
                 actions.innerHTML =
                     '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'msg\', \'' + uid + '\')">[ MSG ]</button>' +
                     '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'quest\', \'' + uid + '\')">[ QUEST ]</button>' +

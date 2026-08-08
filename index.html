@@ -54,7 +54,7 @@
         <div style="display: flex; flex-direction: column;">
             <div style="display: flex; align-items: baseline; gap: 10px;">
                 <span class="header-title" id="main-os-title">POX-BOY 3026</span>
-                <span style="font-size: 0.8rem; opacity: 0.5;">v0.37</span>
+                <span style="font-size: 0.8rem; opacity: 0.5;">v0.39</span>
             </div>
             <span id="pip-clock" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px;"></span>
             <span id="pip-batt" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px; display: none;"></span>
@@ -195,6 +195,8 @@
 
             <!-- MAIL (flat feed: action items pinned, then one chronological stream) -->
             <div id="sub-data-mail" class="sub-tab-content">
+                <!-- v0.38: one-tap new message -- lists all linked contacts as recipients -->
+                <button class="pip-btn" onclick="openRecipientPicker()" style="border-style: dashed; margin-bottom: 15px;">[✉ SEND NEW MESSAGE]</button>
                 <div id="mail-container">
                     <!-- Populated by JS -->
                 </div>
@@ -499,12 +501,14 @@
                 </div>
                 <!-- v0.37: punct keys demoted to narrow .vk-sm utility keys; SPACE/ENTER became
                      .vk-wide word keys whose text can never spill its box -->
+                <!-- v0.38: '?' joins the punctuation utility keys; shares rebalanced for 7 keys -->
                 <div style="display: flex; gap: 4px; justify-content: center;">
                     <button class="pip-btn vk-btn vk-sm" onclick="vkPress(':')">:</button>
                     <button class="pip-btn vk-btn vk-sm" onclick="vkPress('-')">-</button>
                     <button class="pip-btn vk-btn vk-sm" onclick="vkPress(',')">,</button>
-                    <button class="pip-btn vk-btn vk-wide" onclick="vkPress(' ')" style="flex: 3;">SPACE</button>
+                    <button class="pip-btn vk-btn vk-wide" onclick="vkPress(' ')" style="flex: 2.6;">SPACE</button>
                     <button class="pip-btn vk-btn vk-sm" onclick="vkPress('.')">.</button>
+                    <button class="pip-btn vk-btn vk-sm" onclick="vkPress('?')">?</button>
                     <button class="pip-btn vk-btn vk-wide" onclick="vkConfirm()" style="flex: 2.2; border-style: dashed; font-weight: bold;">ENTER</button>
                 </div>
             </div>
@@ -774,7 +778,7 @@
     <div id="pre-boot-overlay" class="modal-overlay" style="z-index: 250; background: var(--pip-bg); flex-direction: column; display: none;">
         <!-- Version Tag & Dev Skip Button -->
         <div style="position: absolute; top: 10px; right: 10px; z-index: 260; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-            <span style="font-size: 0.8rem; opacity: 0.5;">v0.37</span>
+            <span style="font-size: 0.8rem; opacity: 0.5;">v0.39</span>
             <button class="pip-btn" onclick="devSkipToApp()" style="font-size: 0.7rem; padding: 2px 5px; border: none; color: #ff3333; opacity: 0.5;">[DEV: FAST BOOT]</button>
         </div>
         
@@ -796,7 +800,7 @@
 
     <!-- BOOT SPLASH SCREEN -->
     <div id="boot-splash" class="modal-overlay" style="z-index: 200; background: var(--pip-bg); flex-direction: column; display: flex;">
-        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.37</span>
+        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.39</span>
         <div class="crt" style="position: absolute; top:0; left:0; right:0; bottom:0; pointer-events: none; z-index: 201;"></div>
         <div style="z-index: 202; width: 100%; max-width: 600px; padding: 20px; text-align: left; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; justify-content: flex-end;" id="boot-text-container">
             <p id="boot-log-1" style="margin-bottom: 5px; display: none; font-size: 1rem;">ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM</p>
