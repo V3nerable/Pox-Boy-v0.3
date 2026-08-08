@@ -398,9 +398,9 @@
                     <div class="form-group">
                         <input type="text" id="ob-name" class="pip-input vk-target" readonly onclick="openVk('ob-name')" placeholder="ENTER NAME..." style="font-size: 1.5rem; text-align: center;" value="${obNameCache || (userProfile.name !== 'UNKNOWN' ? userProfile.name : '')}">
                     </div>
-                    <div class="item-row" style="flex-direction: column; cursor: pointer; ${isOptIn ? 'background: var(--pip-color-dim); color: var(--pip-bg); text-shadow: none;' : ''}" onclick="toggleOptIn()">
+                    <div class="item-row" style="flex-direction: column; cursor: pointer; ${isOptIn ? 'border: 1px solid var(--pip-color); box-shadow: 0 0 8px var(--pip-color-dim);' : ''}" onclick="toggleOptIn()">
                         <div style="font-weight: bold; padding: 5px 0;">
-                            ${isOptIn ? '☑' : '□'} OPT-IN: LIVE LOCATION TRACKING
+                            <span style="color: var(--pip-color); text-shadow: 0 0 6px var(--pip-color);">${isOptIn ? '☑' : '□'}</span> OPT-IN: LIVE LOCATION TRACKING
                         </div>
                         <div style="font-size: 0.8rem; opacity: 0.8;">I understand that enabling my Pip-Boy GPS will permanently broadcast my Last Known Location to all other event attendees on the global map.</div>
                     </div>
@@ -805,7 +805,6 @@
                 if (currentDataTab === 'quests') renderQuests();
                 if (currentDataTab === 'factions') renderFactions();
                 if (currentDataTab === 'stats') renderStatsTab();
-                if (currentDataTab === 'wastelanders') renderWastelanders();
                 if (currentDataTab === 'mail') { renderMail(); refreshOutboxStatuses(); }
             }
             if (tabId === 'map') {
@@ -844,7 +843,6 @@
                 if (subTabId === 'quests') renderQuests();
                 if (subTabId === 'factions') renderFactions();
                 if (subTabId === 'stats') renderStatsTab();
-                if (subTabId === 'wastelanders') renderWastelanders();
                 if (subTabId === 'mail') { renderMail(); refreshOutboxStatuses(); }
             } else {
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
@@ -863,7 +861,11 @@
             // Theme-tinted hardware outputs: map tiles + camera sensor + QR scanner feed
             root.style.setProperty('--tile-filter', t.mapFx);
             root.style.setProperty('--cam-filter', t.camFx);
-            document.getElementById('theme-display').innerText = `[${t.name}]`;
+            // v0.33: header theme button moved to DATA > OPTIONS; label targets may be absent
+            const themeLblLegacy = document.getElementById('theme-display');
+            if (themeLblLegacy) themeLblLegacy.innerText = `[${t.name}]`;
+            const optThemeBtn = document.getElementById('options-theme-btn');
+            if (optThemeBtn) optThemeBtn.innerText = `[THEME: ${t.name}]`;
         }
 
         // ================= FULLSCREEN ENGINE (v0.23) =================
@@ -931,6 +933,7 @@
             const isFullscreen = isActuallyFullscreen();
             const fsBtn = document.getElementById('fs-btn');
             const pbFsBtn = document.getElementById('pb-fs-btn');
+            const optFsBtn = document.getElementById('options-fs-btn'); // v0.33: new home for the control
             const mode = getDisplayMode();
             const supported = isFsApiSupported();
 
@@ -940,21 +943,26 @@
             if (mode === 'fullscreen' || (!supported && mode === 'standalone')) {
                 if (fsBtn) fsBtn.style.display = 'none';
                 if (pbFsBtn) pbFsBtn.style.display = 'none';
+                if (optFsBtn) optFsBtn.style.display = 'none';
                 return;
             }
             if (fsBtn) fsBtn.style.display = '';
             if (pbFsBtn) pbFsBtn.style.display = '';
+            if (optFsBtn) optFsBtn.style.display = '';
 
             if (isFullscreen) {
                 if (fsBtn) fsBtn.innerText = '[EXIT FULL]';
                 if (pbFsBtn) pbFsBtn.innerText = '[1] DISABLE FULLSCREEN';
+                if (optFsBtn) optFsBtn.innerText = '[EXIT FULL]';
             } else if (fsIntent && isFsApiSupported()) {
                 // User wanted fullscreen but it was lost (e.g. GPS permission popup).
                 if (fsBtn) fsBtn.innerText = '[RESUME FULL]';
                 if (pbFsBtn) pbFsBtn.innerText = '[1] RESUME FULLSCREEN';
+                if (optFsBtn) optFsBtn.innerText = '[RESUME FULL]';
             } else {
                 if (fsBtn) fsBtn.innerText = '[FULLSCREEN]';
                 if (pbFsBtn) pbFsBtn.innerText = '[1] ENABLE FULLSCREEN';
+                if (optFsBtn) optFsBtn.innerText = '[FULLSCREEN]';
             }
         }
 
@@ -995,14 +1003,10 @@
             }
 
             try {
-                // navigationUI:'hide' gives true immersive mode on Android (no OS nav bar).
+                // v0.33: orientation lock REMOVED -- the majority of attendees run portrait,
+                // and the split-layouts engage automatically on rotation via CSS media queries.
                 await fsRacePromise(reqFn.call(document.documentElement, { navigationUI: 'hide' }), 800);
                 if (getFsElement()) fsIntent = true;
-                try {
-                    if (screen.orientation && screen.orientation.lock) {
-                        screen.orientation.lock('landscape').catch(function(){});
-                    }
-                } catch (e) { /* unsupported */ }
                 updateFsButtons();
                 return !!getFsElement();
             } catch (err) {
@@ -1028,9 +1032,6 @@
                 if (typeof exits[i] !== 'function') continue;
                 try { await fsRacePromise(exits[i].call(document), 250); } catch (e) {}
             }
-            try {
-                if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock();
-            } catch (e) { /* unsupported */ }
             updateFsButtons();
         }
 
@@ -1125,6 +1126,8 @@
             if (mainBtn) mainBtn.innerText = `[SIZE: ${label}]`;
             const pbBtn = document.getElementById('pb-size-btn');
             if (pbBtn) pbBtn.innerText = `[2] SCREEN PADDING: ${label}`;
+            const optSizeBtn = document.getElementById('options-size-btn');
+            if (optSizeBtn) optSizeBtn.innerText = `[SIZE: ${label}]`;
         }
         
         // Apply loaded/default size immediately + sync both button labels to it
@@ -1133,6 +1136,8 @@
         if (bootMainBtn) bootMainBtn.innerText = `[SIZE: ${sizeLabels[sizeIndex]}]`;
         const bootPbBtn = document.getElementById('pb-size-btn');
         if (bootPbBtn) bootPbBtn.innerText = `[2] SCREEN PADDING: ${sizeLabels[sizeIndex]}`;
+        const bootOptSizeBtn = document.getElementById('options-size-btn');
+        if (bootOptSizeBtn) bootOptSizeBtn.innerText = `[SIZE: ${sizeLabels[sizeIndex]}]`;
 
         // Inventory Logic
         function renderInventory(category) {
@@ -2284,7 +2289,7 @@
                     if (window.db) {
                         const myRef = window.firebaseRef(window.db, 'wastelanders/' + myUid);
                         window.firebaseSet(myRef, {
-                            name: userProfile.name,
+                            name: (userProfile.name || 'UNKNOWN').slice(0, 24), // rules cap name at 24 chars
                             lat: lat,
                             lng: lng,
                             timestamp: Date.now()
@@ -2323,7 +2328,7 @@
 
         function renderStatsTab() {
             const discoveredCount = waypoints.filter(wp => wp.discovered).length;
-            const container = document.getElementById('sub-data-stats');
+            const container = document.getElementById('stats-general');
             if (container) {
                 container.innerHTML = `
                     <h2>GENERAL STATS</h2><br>
@@ -2332,6 +2337,9 @@
                     <p>NUKA-COLAS DRUNK: 0</p>
                 `;
             }
+            // v0.34: the STATS page also hosts the social panel
+            renderWastelanders();
+            renderLinkRequests();
         }
 
         function toggleDevMode() {
@@ -2838,7 +2846,7 @@
                     action: () => {
                         addContact(uid, name);
                         sendHandshake(uid);
-                        if (currentDataTab === 'wastelanders') renderWastelanders();
+                        if (currentDataTab === 'stats') renderStatsTab();
                     }
                 },
                 { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
@@ -2866,7 +2874,63 @@
         // them accepting puts YOU in THEIR rolodex. (Spam-proof: the letter can only
         // exist if you were physically shown their card.)
         function sendHandshake(uid) {
-            queueMail(uid, 'handshake', {}, 'LINK REQUEST');
+            // v0.34 BUGFIX: payload must be NON-EMPTY. The published Firebase rules require
+            // hasChildren([...'payload']), but RTDB treats an empty object as a delete, so
+            // old handshakes arrived invalid and the outbox entry stuck at QUEUED forever.
+            queueMail(uid, 'handshake', { kind: 'link' }, 'LINK REQUEST');
+        }
+
+        // Sending your datacard to a known contact via mail (their prompt = same as being scanned):
+        // useful when they declined earlier, or their rolodex was wiped and you still have theirs.
+        function sendDatacardViaMail() {
+            const c = contactByUid(contactUidTarget);
+            if (!c) return closeModals();
+            showCustomPrompt('TRANSMIT YOUR DATACARD TO ' + c.name + '? THEY WILL GET A LINK REQUEST JUST AS IF THEY SCANNED YOU.', [
+                {
+                    label: 'SEND DATACARD',
+                    action: () => {
+                        sendHandshake(c.uid);
+                        closeModals();
+                        notifyTxResult();
+                        renderLinkRequests();
+                    }
+                },
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+
+        function addContact(uid, name) {
+            if (isContact(uid)) return;
+            rolodex.push({ uid: uid, name: name || 'UNKNOWN', metAt: Date.now() });
+            saveComms();
+            // Promote any quarantined transmissions from this frequency into the live inbox
+            let promoted = 0;
+            for (let key in unverifiedLetters) {
+                if (unverifiedLetters[key].from === uid) {
+                    inboxLetters[key] = unverifiedLetters[key];
+                    delete unverifiedLetters[key];
+                    promoted++;
+                }
+            }
+            // v0.34: the link is now live, so retire our pending handshake letters to them
+            pruneHandshakeOutbox(uid);
+            showNotification('CONTACT SECURED: ' + (name || 'UNKNOWN') + (promoted ? ' (' + promoted + ' HELD TRANSMISSION' + (promoted > 1 ? 'S' : '') + ' UNLOCKED)' : ''));
+            renderMailBadge();
+        }
+
+        function pruneHandshakeOutbox(uid) {
+            let changed = false;
+            for (let i = outbox.length - 1; i >= 0; i--) {
+                const e = outbox[i];
+                if (e.type === 'handshake' && e.to === uid) {
+                    if (e.key && window.db) {
+                        window.firebaseRemove(window.firebaseRef(window.db, 'mail/' + e.to + '/' + e.key)).catch(() => {});
+                    }
+                    outbox.splice(i, 1);
+                    changed = true;
+                }
+            }
+            if (changed) saveComms();
         }
 
         // --- OUTBOX: queue offline, flush when the satellite comes back ---
@@ -2985,7 +3049,7 @@
                                 action: () => {
                                     addContact(safeUid(l.from), (l.fromName || 'UNKNOWN').toUpperCase());
                                     retireLetter(key);
-                                    if (currentDataTab === 'wastelanders') renderWastelanders();
+                                    if (currentDataTab === 'stats') renderStatsTab();
                                 }
                             },
                             { label: 'IGNORE', color: 'var(--pip-color-dim)', action: () => { retireLetter(key); } }
@@ -3027,6 +3091,7 @@
             if (mailProcessed.length > 500) mailProcessed = mailProcessed.slice(-500);
             saveProcessed();
             delete inboxLetters[key];
+            delete unverifiedLetters[key]; // also consume letters opened via the untrusted gate
         }
 
         function typeSummary(l) {
@@ -3035,8 +3100,28 @@
             return 'MESSAGE';
         }
 
-        function openMailItem(key) {
-            const l = inboxLetters[key];
+        // v0.34: untrusted transmissions can be opened on demand (with a warning gate first)
+        function openUntrusted(key) {
+            const l = unverifiedLetters[key];
+            if (!l) return;
+            showCustomPrompt('UNTRUSTED ' + (l.type || '???').toUpperCase() + ' FROM "' + (l.fromName || 'UNKNOWN') + '". THIS FREQUENCY IS NOT LINKED HOW DO YOU PROCEED?', [
+                {
+                    label: 'OPEN ANYWAY (STAY UNLINKED)',
+                    action: () => openMailItem(key, 'unverified')
+                },
+                {
+                    label: 'TRUST SENDER (LINK)',
+                    action: () => {
+                        addContact(safeUid(l.from), (l.fromName || 'UNKNOWN').toUpperCase());
+                        if (mailTabActive()) renderMail();
+                    }
+                },
+                { label: 'IGNORE', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+
+        function openMailItem(key, src) {
+            const l = (src === 'unverified') ? unverifiedLetters[key] : inboxLetters[key];
             if (!l) return;
             const from = (l.fromName || 'UNKNOWN');
             if (l.type === 'msg') {
@@ -3081,7 +3166,7 @@
                 name: (p.title || 'UNNAMED CONTRACT').toUpperCase(),
                 type: 'CONTRACT',
                 giver: (l.fromName || 'UNKNOWN').toUpperCase(),
-                location: 'P2P LINK',
+                location: (p.location || 'P2P LINK'),
                 timeStr: p.timeStr || '--:--',
                 expireTime: p.expireTime || null,
                 objectives: objectives,
@@ -3177,6 +3262,26 @@
             ]);
         }
 
+        // --- LINK REQUESTS panel (handshake outbox, lives under STATS — separate from mail) ---
+        function renderLinkRequests() {
+            const el = document.getElementById('linkrequests-list');
+            if (!el) return;
+            const links = outbox.filter(e => e.type === 'handshake');
+            if (!links.length) {
+                el.innerHTML = '<p style="opacity:0.5;">NO PENDING LINK REQUESTS. SCAN A DATACARD OR SEND YOURS.</p>';
+                return;
+            }
+            el.innerHTML = '';
+            [...links].reverse().forEach(e => {
+                const c = contactByUid(e.to);
+                const row = document.createElement('div');
+                row.className = 'item-row';
+                row.style.cursor = 'default';
+                row.innerHTML = '<div class="item-info"><div>↑ ' + escapeHtml(e.summary) + ' → ' + escapeHtml(c ? c.name : e.to) + '</div><div class="item-effects">' + escapeHtml(statusLabel(e)) + ' — ' + new Date(e.ts || Date.now()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) + '</div></div><button class="theme-btn" onclick="clearOutboxEntry(\'' + e.id + '\'); renderLinkRequests();">[X]</button>';
+                el.appendChild(row);
+            });
+        }
+
         // --- COMPOSERS (contact-gated: you can only transmit to scanned contacts) ---
         function composeTo(kind, uidOverride) {
             const uid = uidOverride || contactUidTarget;
@@ -3190,8 +3295,7 @@
                 document.getElementById('compose-msg-modal').style.display = 'flex';
             } else if (kind === 'quest') {
                 document.getElementById('cq-title').innerText = 'QUEST TO: ' + c.name;
-                ['cq-name','cq-brief','cq-obj1','cq-obj2','cq-obj3','cq-reward'].forEach(id => { document.getElementById(id).value = ''; });
-                document.getElementById('cq-limit').value = '0';
+                ['cq-name','cq-brief','cq-obj1','cq-obj2','cq-obj3','cq-reward','cq-loc','cq-time'].forEach(id => { document.getElementById(id).value = ''; });
                 document.getElementById('compose-quest-modal').style.display = 'flex';
             } else if (kind === 'item') {
                 openItemComposer(c);
@@ -3215,22 +3319,43 @@
             const title = document.getElementById('cq-name').value.trim();
             if (!title) return showNotification('A QUEST NEEDS A TITLE.');
             const brief = document.getElementById('cq-brief').value.trim().toUpperCase();
+            const location = (document.getElementById('cq-loc').value.trim() || 'P2P LINK').toUpperCase();
             const objectives = ['cq-obj1','cq-obj2','cq-obj3']
                 .map(id => document.getElementById(id).value.trim())
                 .filter(Boolean)
                 .map(s => s.toUpperCase());
             if (!objectives.length) objectives.push('COMPLETION TERMS: SEE GIVER.');
             const reward = document.getElementById('cq-reward').value.trim().toUpperCase();
-            const limitMin = parseInt(document.getElementById('cq-limit').value, 10) || 0;
+
+            // v0.34: expiration now accepts a clock time just like +ADD QUEST ("18:00" or "1800")
+            const timeInput = document.getElementById('cq-time').value.trim();
             let expireTime = null, timeStr = '--:--';
-            if (limitMin > 0) {
-                expireTime = Date.now() + limitMin * 60000;
-                const d = new Date(expireTime);
-                timeStr = String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+            if (timeInput) {
+                let h = NaN, m = NaN;
+                if (timeInput.includes(':')) {
+                    const parts = timeInput.split(':');
+                    h = parseInt(parts[0], 10); m = parseInt(parts[1], 10);
+                } else {
+                    const clean = timeInput.replace(/[^0-9]/g, '');
+                    if (clean.length >= 3) {
+                        h = parseInt(clean.substring(0, clean.length - 2), 10);
+                        m = parseInt(clean.substring(clean.length - 2), 10);
+                    }
+                }
+                if (!isNaN(h) && !isNaN(m) && h >= 0 && h < 24 && m >= 0 && m < 60) {
+                    const d = new Date();
+                    d.setHours(h, m, 0, 0);
+                    if (d < new Date()) d.setDate(d.getDate() + 1); // past today = tomorrow
+                    expireTime = d.getTime();
+                    timeStr = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+                } else {
+                    return showNotification('EXPIRATION MUST BE A 24H CLOCK TIME (e.g. 18:00) OR LEFT BLANK.');
+                }
             }
+
             const c = contactByUid(contactUidTarget);
             if (!c) return closeModals();
-            queueMail(c.uid, 'quest', { title: title.toUpperCase(), brief: brief, objectives: objectives, reward: reward, expireTime: expireTime, timeStr: timeStr }, 'QUEST: ' + title.toUpperCase());
+            queueMail(c.uid, 'quest', { title: title.toUpperCase(), brief: brief, location: location, objectives: objectives, reward: reward, expireTime: expireTime, timeStr: timeStr }, 'QUEST: ' + title.toUpperCase());
             closeModals();
             notifyTxResult();
         }
@@ -3298,44 +3423,55 @@
             const el = document.getElementById('mail-container');
             if (!el) return;
             let html = '';
-            // INBOX
-            html += '<h3 style="border-bottom:2px solid var(--pip-color); padding-bottom:5px; margin-bottom:10px;">INCOMING TRANSMISSIONS</h3>';
+
+            // v0.33: mail is a FLAT feed of per-message entities (no outlook-style
+            // folders/per-user grouping). Zone 1 = anything needing action, pinned top.
+            // Zone 2 = one merged chronological history of sent + received transmissions.
+            const timeOf = (ts) => new Date(ts || Date.now()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+
+            // ---- ZONE 1: ACTION REQUIRED ----
             const inKeys = Object.keys(inboxLetters).sort((a, b) => (inboxLetters[b].ts || 0) - (inboxLetters[a].ts || 0));
-            if (!inKeys.length) {
-                html += '<p style="opacity:0.5; margin-bottom:20px;">NO PENDING TRANSMISSIONS.</p>';
-            } else {
+            const uKeys = Object.keys(unverifiedLetters).sort((a, b) => (unverifiedLetters[b].ts || 0) - (unverifiedLetters[a].ts || 0));
+            if (inKeys.length || uKeys.length) {
+                html += '<h3 style="border-bottom:2px solid var(--pip-color); padding-bottom:5px; margin-bottom:10px;">⚠ ACTION REQUIRED</h3>';
                 inKeys.forEach(k => {
                     const l = inboxLetters[k];
-                    html += '<div class="item-row" onclick="openMailItem(\'' + k + '\')"><div class="item-info"><div>' + escapeHtml(typeSummary(l)) + '</div><div class="item-effects">FROM: ' + escapeHtml(l.fromName || 'UNKNOWN') + ' — ' + new Date(l.ts || Date.now()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) + '</div></div><div class="item-qty">&gt;</div></div>';
+                    html += '<div class="item-row" onclick="openMailItem(\'' + k + '\')"><div class="item-info"><div>↓ ' + escapeHtml(typeSummary(l)) + '</div><div class="item-effects">FROM: ' + escapeHtml(l.fromName || 'UNKNOWN') + ' — ' + timeOf(l.ts) + ' — TAP TO RESPOND</div></div><div class="item-qty">&gt;</div></div>';
                 });
-            }
-            // UNVERIFIED QUARANTINE
-            const uKeys = Object.keys(unverifiedLetters);
-            if (uKeys.length) {
-                html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:20px 0 10px; opacity:0.8;">QUARANTINE (' + uKeys.length + ')</h3>';
-                html += '<p style="font-size:0.9rem; opacity:0.7; margin-bottom:10px;">FROM UNLINKED FREQUENCIES. SCAN THE SENDER\'S DATACARD TO UNLOCK.</p>';
                 uKeys.forEach(k => {
                     const l = unverifiedLetters[k];
-                    html += '<div class="item-row" style="opacity:0.6; cursor:default;"><div class="item-info"><div>UNTRUSTED: ' + escapeHtml((l.type || '???').toUpperCase()) + '</div><div class="item-effects">CLAIMS TO BE: ' + escapeHtml(l.fromName || 'UNKNOWN') + '</div></div><div class="item-qty">?</div></div>';
+                    html += '<div class="item-row" style="opacity:0.8;" onclick="openUntrusted(\'' + k + '\')"><div class="item-info"><div>⚠ UNTRUSTED ' + escapeHtml((l.type || '???').toUpperCase()) + '</div><div class="item-effects">CLAIMS TO BE: ' + escapeHtml(l.fromName || 'UNKNOWN') + ' — TAP FOR OPTIONS</div></div><div class="item-qty">?</div></div>';
                 });
             }
-            // OUTBOX
-            html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:20px 0 10px; opacity:0.8;">OUTBOX</h3>';
-            if (!outbox.length) {
-                html += '<p style="opacity:0.5; margin-bottom:20px;">NOTHING SENT.</p>';
-            } else {
-                [...outbox].reverse().slice(0, 30).forEach(e => {
-                    const c = contactByUid(e.to);
-                    html += '<div class="item-row" style="cursor:default;"><div class="item-info"><div>' + escapeHtml(e.summary) + ' → ' + escapeHtml(c ? c.name : e.to) + '</div><div class="item-effects">STATUS: ' + escapeHtml(statusLabel(e)) + '</div></div><button class="theme-btn" onclick="clearOutboxEntry(\'' + e.id + '\')">[CLEAR]</button></div>';
-                });
+
+            // ---- ZONE 2: merged history feed (outbox + message log, newest first) ----
+            // v0.34: handshakes are excluded — link requests live under STATS, not mail
+            const history = [];
+            outbox.forEach(e => { if (e.type !== 'handshake') history.push({ ts: e.ts || 0, kind: 'out', e: e }); });
+            mailLog.forEach(m => history.push({ ts: m.ts || 0, kind: 'log', m: m }));
+            history.sort((a, b) => b.ts - a.ts);
+
+            if (inKeys.length || uKeys.length || history.length) {
+                html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:20px 0 10px; opacity:0.8;">TRANSMISSIONS</h3>';
             }
-            // TRANSMISSION LOG
-            html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:20px 0 10px; opacity:0.8;">TRANSMISSION LOG</h3>';
-            if (!mailLog.length) {
-                html += '<p style="opacity:0.5;">LOG EMPTY.</p>';
+            if (!history.length) {
+                if (!inKeys.length && !uKeys.length) {
+                    html += '<p style="text-align:center; opacity:0.5; margin-top:30px;">NO TRANSMISSIONS YET.<br>SCAN A WASTELANDER\'S DATACARD TO START TALKING.</p>';
+                } else {
+                    html += '<p style="opacity:0.5;">NOTHING SENT OR LOGGED YET.</p>';
+                }
             } else {
-                mailLog.slice(0, 30).forEach(m => {
-                    html += '<div style="border-bottom:1px dashed var(--pip-color-dim); padding:6px 0; font-size:1rem;"><span style="opacity:0.7;">' + (m.dir === 'in' ? 'FROM' : 'TO') + ' ' + escapeHtml(m.name) + ':</span> ' + escapeHtml(m.text) + '</div>';
+                history.slice(0, 50).forEach(h => {
+                    if (h.kind === 'out') {
+                        const e = h.e;
+                        const c = contactByUid(e.to);
+                        const terminal = (e.status === 'accepted' || e.status === 'declined' || e.status === 'fulfilled' || e.status === 'closed');
+                        const clearable = terminal || e.status === 'queued';
+                        html += '<div class="item-row" style="cursor:default;"><div class="item-info"><div>↑ ' + escapeHtml(e.summary) + ' → ' + escapeHtml(c ? c.name : e.to) + '</div><div class="item-effects">' + escapeHtml(statusLabel(e)) + ' — ' + timeOf(e.ts) + '</div></div>' + (clearable ? '<button class="theme-btn" onclick="clearOutboxEntry(\'' + e.id + '\')">[X]</button>' : '') + '</div>';
+                    } else {
+                        const m = h.m;
+                        html += '<div style="border-bottom:1px dashed var(--pip-color-dim); padding:6px 0; font-size:1rem;"><span style="opacity:0.7;">' + (m.dir === 'in' ? '↓ FROM ' : '↑ TO ') + escapeHtml(m.name) + ' — ' + timeOf(m.ts) + ':</span> ' + escapeHtml(m.text) + '</div>';
+                    }
                 });
             }
             el.innerHTML = html;
