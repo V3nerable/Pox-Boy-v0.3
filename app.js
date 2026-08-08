@@ -805,6 +805,7 @@
                 if (currentDataTab === 'quests') renderQuests();
                 if (currentDataTab === 'factions') renderFactions();
                 if (currentDataTab === 'stats') renderStatsTab();
+                if (currentDataTab === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
                 if (currentDataTab === 'mail') { renderMail(); refreshOutboxStatuses(); }
             }
             if (tabId === 'map') {
@@ -843,6 +844,7 @@
                 if (subTabId === 'quests') renderQuests();
                 if (subTabId === 'factions') renderFactions();
                 if (subTabId === 'stats') renderStatsTab();
+                if (subTabId === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
                 if (subTabId === 'mail') { renderMail(); refreshOutboxStatuses(); }
             } else {
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
@@ -860,7 +862,7 @@
             root.style.setProperty('--pip-rgb', t.rgb);
             // Theme-tinted hardware outputs: map tiles + camera sensor + QR scanner feed
             root.style.setProperty('--tile-filter', t.mapFx);
-            root.style.setProperty('--cam-filter', t.camFx);
+            applyCamFilter(); // v0.35: routed so NIGHT MODE gain survives theme swaps
             // v0.33: header theme button moved to DATA > OPTIONS; label targets may be absent
             const themeLblLegacy = document.getElementById('theme-display');
             if (themeLblLegacy) themeLblLegacy.innerText = `[${t.name}]`;
@@ -2333,13 +2335,13 @@
                 container.innerHTML = `
                     <h2>GENERAL STATS</h2><br>
                     <p>LOCATIONS DISCOVERED: ${discoveredCount}</p>
+                    <p>WASTELANDERS MET: ${rolodex.length}</p>
                     <p>DAYS PASSED: 0</p>
                     <p>NUKA-COLAS DRUNK: 0</p>
                 `;
             }
-            // v0.34: the STATS page also hosts the social panel
-            renderWastelanders();
-            renderLinkRequests();
+            // v0.35: roster lives on its own WASTELANDERS tab again; stats just reports
+            if (currentDataTab === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
         }
 
         function toggleDevMode() {
@@ -2429,6 +2431,43 @@
             return null;
         }
         
+        // ==================== NIGHT MODE (v0.35) ====================
+        // Dual approach to "can't see at night": (1) digital gain -- re-derive the theme
+        // sensor filter with boosted brightness; (2) hardware torch via track.applyConstraints
+        // (Android Chrome on rear sensors; iOS Safari has no browser torch -> boost only).
+        let camNightMode = false;
+
+        function applyCamFilter() {
+            const base = themes[currentThemeIndex].camFx;
+            const fx = camNightMode ? base + ' brightness(2.0) saturate(0.75)' : base;
+            document.documentElement.style.setProperty('--cam-filter', fx);
+        }
+
+        async function applyTorch(on) {
+            try {
+                if (!rawVideoStream) return false;
+                const track = rawVideoStream.getVideoTracks()[0];
+                const caps = track.getCapabilities ? track.getCapabilities() : {};
+                if (!caps || !('torch' in caps)) return false; // iOS / front cam / desktop: no torch
+                await track.applyConstraints({ advanced: [{ torch: !!on }] });
+                return true;
+            } catch (e) { return false; }
+        }
+
+        async function toggleNightMode() {
+            camNightMode = !camNightMode;
+            let torchState = '';
+            if (rawVideoStream) {
+                const ok = await applyTorch(camNightMode);
+                torchState = ok ? ' + FLASHLIGHT ON' : '';
+                if (camNightMode && !ok) torchState = ' (NO FLASHLIGHT ON THIS DEVICE)';
+            }
+            applyCamFilter();
+            const btn = document.getElementById('cam-night-btn');
+            if (btn) btn.innerText = camNightMode ? '◧ NIGHT MODE: ON' : '◧ NIGHT MODE: OFF';
+            showNotification(camNightMode ? ('NIGHT MODE ENGAGED: SENSOR GAIN BOOSTED' + torchState) : 'NIGHT MODE DISENGAGED.');
+        }
+
         async function startCamera() {
             const video = document.getElementById('cam-video');
             const placeholder = document.getElementById('cam-placeholder');
@@ -2490,10 +2529,13 @@
                     }
                     video.style.transform = mirror ? 'scaleX(-1)' : 'scaleX(1)';
                 } catch(e) {
-                    video.style.transform = (currentFacingMode === 'user') ? 'scaleX(-1)' : 'scaleX(1)';
-                }
-                
-                // Fix for Android blank screens: Force video to play explicitly
+                video.style.transform = (currentFacingMode === 'user') ? 'scaleX(-1)' : 'scaleX(1)';
+            }
+
+            // Re-arm the torch if NIGHT MODE survived a stream restart (flip/power-cycle)
+            if (camNightMode) applyTorch(true);
+
+            // Fix for Android blank screens: Force video to play explicitly
                 // Some browsers return a promise from play()
                 const playPromise = video.play();
                 if (playPromise !== undefined) {
@@ -2846,7 +2888,7 @@
                     action: () => {
                         addContact(uid, name);
                         sendHandshake(uid);
-                        if (currentDataTab === 'stats') renderStatsTab();
+                        if (currentDataTab === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
                     }
                 },
                 { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
@@ -3049,7 +3091,7 @@
                                 action: () => {
                                     addContact(safeUid(l.from), (l.fromName || 'UNKNOWN').toUpperCase());
                                     retireLetter(key);
-                                    if (currentDataTab === 'stats') renderStatsTab();
+                                    if (currentDataTab === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
                                 }
                             },
                             { label: 'IGNORE', color: 'var(--pip-color-dim)', action: () => { retireLetter(key); } }
@@ -3222,7 +3264,7 @@
                 }
                 const row = document.createElement('div');
                 row.className = 'item-row';
-                row.innerHTML = '<div class="item-info"><div>' + escapeHtml(c.name) + '</div><div class="item-effects">' + presence + '</div></div><div class="item-qty">&gt;</div>';
+                row.innerHTML = '<div class="item-info"><div>' + escapeHtml(c.name) + '</div><div class="item-effects">' + presence + '</div></div><button class="theme-btn" style="border-color: #ff3333; color: #ff3333;" onclick="event.stopPropagation(); forgetWastelander(\'' + safeUid(c.uid) + '\')">[FORGET]</button>';
                 row.onclick = () => openContactSheet(c.uid);
                 el.appendChild(row);
             });
@@ -3243,23 +3285,30 @@
             document.getElementById('contact-modal').style.display = 'flex';
         }
 
-        function removeActiveContact() {
-            const c = contactByUid(contactUidTarget);
-            if (!c) return closeModals();
-            showCustomPrompt('REMOVE ' + c.name + ' FROM WASTELANDERS MET? TRANSMISSIONS FROM THEM WILL BE QUARANTINED.', [
+        // v0.35: shared FORGET flow (per-row button + contact sheet) with prompt confirmation
+        function forgetWastelander(uid) {
+            const c = contactByUid(uid);
+            if (!c) return;
+            showCustomPrompt('FORGET ' + c.name + '? THEY WILL BE REMOVED FROM WASTELANDERS MET AND FUTURE TRANSMISSIONS WILL BE QUARANTINED.', [
                 {
-                    label: 'YES, REMOVE',
+                    label: 'YES, FORGET THEM',
                     color: '#ff3333',
                     action: () => {
-                        rolodex = rolodex.filter(x => x.uid !== contactUidTarget);
+                        rolodex = rolodex.filter(x => x.uid !== uid);
                         saveComms();
                         closeModals();
                         renderWastelanders();
                         renderMailBadge();
+                        if (currentDataTab === 'stats') renderStatsTab();
                     }
                 },
                 { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
             ]);
+        }
+
+        function removeActiveContact() {
+            if (!contactByUid(contactUidTarget)) return closeModals();
+            forgetWastelander(contactUidTarget);
         }
 
         // --- LINK REQUESTS panel (handshake outbox, lives under STATS — separate from mail) ---

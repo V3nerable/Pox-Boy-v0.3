@@ -54,7 +54,7 @@
         <div style="display: flex; flex-direction: column;">
             <div style="display: flex; align-items: baseline; gap: 10px;">
                 <span class="header-title" id="main-os-title">POX-BOY 3026</span>
-                <span style="font-size: 0.8rem; opacity: 0.5;">v0.34</span>
+                <span style="font-size: 0.8rem; opacity: 0.5;">v0.35</span>
             </div>
             <span id="pip-clock" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px;"></span>
             <span id="pip-batt" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px; display: none;"></span>
@@ -140,10 +140,7 @@
 
         <!-- ================= INV TAB ================= -->
         <div id="tab-inv" class="tab-content">
-            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                <button class="theme-btn" onclick="startQRScanner()" style="flex: 1; border-style: dashed; font-size: 1.1rem; padding: 10px;">[SCAN TRANSFER]</button>
-                <button class="theme-btn" onclick="openDatacard()" style="flex: 1; border-style: dashed; font-size: 1.1rem; padding: 10px;">[MY DATACARD]</button>
-            </div>
+            <button class="theme-btn" onclick="startQRScanner()" style="width: 100%; border-style: dashed; font-size: 1.1rem; margin-bottom: 15px; padding: 10px;">[SCAN TRANSFER]</button>
             <div class="sub-nav" id="inv-sub-nav">
                 <div class="sub-nav-item active" onclick="switchSubTab('inv', 'weapons')">WEAPONS</div>
                 <div class="sub-nav-item" onclick="switchSubTab('inv', 'apparel')">APPAREL</div>
@@ -162,6 +159,7 @@
             </div>
             <div class="sub-nav" id="data-sub-nav" style="flex-wrap: wrap; column-gap: 15px; row-gap: 6px;">
                 <div class="sub-nav-item active" onclick="switchSubTab('data', 'quests')">QUESTS</div>
+                <div class="sub-nav-item" onclick="switchSubTab('data', 'wastelanders')">WASTELANDERS</div>
                 <div class="sub-nav-item" id="data-mail-navitem" onclick="switchSubTab('data', 'mail')">MAIL</div>
                 <div class="sub-nav-item" onclick="switchSubTab('data', 'factions')">FACTIONS</div>
                 <div class="sub-nav-item" onclick="switchSubTab('data', 'stats')">STATS</div>
@@ -174,12 +172,24 @@
                 <button class="pip-btn" id="options-fs-btn" onclick="toggleFullscreen()" style="border-style: dashed;">[FULLSCREEN]</button>
                 <button class="pip-btn" id="options-size-btn" onclick="cycleSize()" style="border-style: dashed;">[SIZE: SHRINK 2]</button>
                 <button class="pip-btn" id="options-theme-btn" onclick="cycleTheme()" style="border-style: dashed;">[THEME: GREEN]</button>
-                <p style="font-size: 0.9rem; opacity: 0.7; margin-top: 15px; line-height: 1.4;">PADDING cycles MAX / SHRINK 1 / SHRINK 2 and persists. THEME tints the phosphor, map and optics. FULLSCREEN is hidden on devices where the OS already locks immersion.</p>
+                <p style="font-size: 0.9rem; opacity: 0.7; margin-top: 15px; line-height: 1.4;">PADDING cycles MAX / SHRINK 1 / SHRINK 2 and persists. THEME tints the phosphor, map and optics. FULLSCREEN works in ANY orientation and on any device that supports it — on iPhone it lives behind "ADD TO HOME SCREEN" instead. Hidden when the OS already locks immersion.</p>
             </div>
 
             <!-- QUESTS -->
             <div id="sub-data-quests" class="sub-tab-content active">
                 <!-- Dynamically populated by JS -->
+            </div>
+
+            <!-- WASTELANDERS MET (Rolodex + link requests) -->
+            <div id="sub-data-wastelanders" class="sub-tab-content">
+                <button class="theme-btn" onclick="openDatacard()" style="width: 100%; border-style: dashed; font-size: 1.2rem; margin-bottom: 15px; padding: 10px;">[BROADCAST MY DATACARD]</button>
+                <div id="wastelanders-list">
+                    <!-- Populated by JS -->
+                </div>
+                <h3 style="border-bottom: 1px dashed var(--pip-color-dim); padding-bottom: 5px; margin: 25px 0 10px;">LINK REQUESTS</h3>
+                <div id="linkrequests-list">
+                    <!-- Populated by JS -->
+                </div>
             </div>
 
             <!-- MAIL (flat feed: action items pinned, then one chronological stream) -->
@@ -197,22 +207,13 @@
                 </div>
             </div>
 
-            <!-- DATA STATS + SOCIAL (datacard / wastelanders met / link requests) -->
+            <!-- DATA STATS -->
             <div id="sub-data-stats" class="sub-tab-content">
                 <div id="stats-general">
                     <h2>GENERAL STATS</h2><br>
                     <p>LOCATIONS DISCOVERED: 1</p>
                     <p>DAYS PASSED: 0</p>
                     <p>NUKA-COLAS DRUNK: 0</p>
-                </div>
-                <h3 style="border-bottom: 1px dashed var(--pip-color-dim); padding-bottom: 5px; margin: 25px 0 10px;">WASTELANDERS MET</h3>
-                <button class="theme-btn" onclick="openDatacard()" style="width: 100%; border-style: dashed; font-size: 1.2rem; margin-bottom: 15px; padding: 10px;">[BROADCAST MY DATACARD]</button>
-                <div id="wastelanders-list">
-                    <!-- Populated by JS -->
-                </div>
-                <h3 style="border-bottom: 1px dashed var(--pip-color-dim); padding-bottom: 5px; margin: 25px 0 10px;">LINK REQUESTS</h3>
-                <div id="linkrequests-list">
-                    <!-- Populated by JS -->
                 </div>
             </div>
         </div>
@@ -289,6 +290,7 @@
                         <h2 class="landscape-only">SENSOR CONTROLS</h2>
                         <button class="pip-btn" id="cam-snap-btn" onclick="takePhoto()" style="font-weight: bold; border-style: dashed;">[ CAPTURE ]</button>
                         <button class="pip-btn" id="cam-flip-btn" onclick="flipCamera()" style="font-weight: bold;">↻ FLIP SENSOR</button>
+                        <button class="pip-btn" id="cam-night-btn" onclick="toggleNightMode()" style="font-weight: bold;">◧ NIGHT MODE: OFF</button>
                         <button class="pip-btn" id="cam-exit-btn" onclick="stopCamera()" style="font-weight: bold; color: #ff3333; border-color: #ff3333;">X POWER OFF</button>
                         
                         <div id="cam-save-controls" style="display: none; flex-direction: column; gap: 10px; margin-top: 10px; border-top: 1px dashed var(--pip-color-dim); padding-top: 10px;">
@@ -448,41 +450,8 @@
             </div>
             
             <div id="vk-keys" style="display: flex; flex-direction: column; gap: 5px;">
-                <div style="display: flex; gap: 5px; justify-content: center;">
-                    <button class="pip-btn vk-btn" onclick="vkPress('Q')">Q</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('W')">W</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('E')">E</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('R')">R</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('T')">T</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('Y')">Y</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('U')">U</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('I')">I</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('O')">O</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('P')">P</button>
-                </div>
-                <div style="display: flex; gap: 5px; justify-content: center;">
-                    <button class="pip-btn vk-btn" onclick="vkPress('A')">A</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('S')">S</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('D')">D</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('F')">F</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('G')">G</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('H')">H</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('J')">J</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('K')">K</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('L')">L</button>
-                </div>
-                <div style="display: flex; gap: 5px; justify-content: center;">
-                    <button class="pip-btn vk-btn" onclick="vkPress('Z')">Z</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('X')">X</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('C')">C</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('V')">V</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('B')">B</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('N')">N</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('M')">M</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress(',')">,</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('.')">.</button>
-                </div>
-                <div style="display: flex; gap: 5px; justify-content: center;">
+                <!-- v0.35: phone-standard layout (numbers row + QWERTY + big bottom row), pip skin -->
+                <div style="display: flex; gap: 4px; justify-content: center;">
                     <button class="pip-btn vk-btn" onclick="vkPress('1')">1</button>
                     <button class="pip-btn vk-btn" onclick="vkPress('2')">2</button>
                     <button class="pip-btn vk-btn" onclick="vkPress('3')">3</button>
@@ -494,18 +463,51 @@
                     <button class="pip-btn vk-btn" onclick="vkPress('9')">9</button>
                     <button class="pip-btn vk-btn" onclick="vkPress('0')">0</button>
                 </div>
-                <div style="display: flex; gap: 5px; justify-content: center; margin-top: 5px;">
+                <div style="display: flex; gap: 4px; justify-content: center;">
+                    <button class="pip-btn vk-btn" onclick="vkPress('Q')">Q</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('W')">W</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('E')">E</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('R')">R</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('T')">T</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('Y')">Y</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('U')">U</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('I')">I</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('O')">O</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('P')">P</button>
+                </div>
+                <div style="display: flex; gap: 4px; justify-content: center;">
+                    <button class="pip-btn vk-btn" onclick="vkPress('A')">A</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('S')">S</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('D')">D</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('F')">F</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('G')">G</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('H')">H</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('J')">J</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('K')">K</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('L')">L</button>
+                </div>
+                <div style="display: flex; gap: 4px; justify-content: center;">
+                    <button class="pip-btn vk-btn" onclick="vkPress('Z')">Z</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('X')">X</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('C')">C</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('V')">V</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('B')">B</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('N')">N</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('M')">M</button>
+                    <button class="pip-btn vk-btn" onclick="vkBackspace()" style="flex: 1.5;">⌫</button>
+                </div>
+                <div style="display: flex; gap: 4px; justify-content: center;">
                     <button class="pip-btn vk-btn" onclick="vkPress(':')">:</button>
                     <button class="pip-btn vk-btn" onclick="vkPress('-')">-</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('+')">+</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress('%')">%</button>
-                    <button class="pip-btn vk-btn" onclick="vkPress(' ')" style="flex-grow: 1;">SPACE</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress(',')">,</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress(' ')" style="flex: 3;">SPACE</button>
+                    <button class="pip-btn vk-btn" onclick="vkPress('.')">.</button>
+                    <button class="pip-btn vk-btn" onclick="vkConfirm()" style="flex: 2; border-style: dashed; font-weight: bold;">ENTER</button>
                 </div>
             </div>
-            
-            <div style="display: flex; justify-content: space-between; margin-top: 10px; gap: 10px;">
-                <button class="pip-btn" onclick="vkCancel()" style="border-style: dashed; flex-grow: 1;">CANCEL</button>
-                <button class="pip-btn" onclick="vkConfirm()" style="flex-grow: 1;">CONFIRM</button>
+
+            <div style="margin-top: 8px;">
+                <button class="pip-btn" onclick="vkCancel()" style="border-style: dashed; margin: 0; font-size: 1rem; padding: 4px; opacity: 0.8;">CANCEL ENTRY</button>
             </div>
         </div>
     </div>
@@ -769,7 +771,7 @@
     <div id="pre-boot-overlay" class="modal-overlay" style="z-index: 250; background: var(--pip-bg); flex-direction: column; display: none;">
         <!-- Version Tag & Dev Skip Button -->
         <div style="position: absolute; top: 10px; right: 10px; z-index: 260; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-            <span style="font-size: 0.8rem; opacity: 0.5;">v0.34</span>
+            <span style="font-size: 0.8rem; opacity: 0.5;">v0.35</span>
             <button class="pip-btn" onclick="devSkipToApp()" style="font-size: 0.7rem; padding: 2px 5px; border: none; color: #ff3333; opacity: 0.5;">[DEV: FAST BOOT]</button>
         </div>
         
@@ -791,7 +793,7 @@
 
     <!-- BOOT SPLASH SCREEN -->
     <div id="boot-splash" class="modal-overlay" style="z-index: 200; background: var(--pip-bg); flex-direction: column; display: flex;">
-        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.34</span>
+        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.35</span>
         <div class="crt" style="position: absolute; top:0; left:0; right:0; bottom:0; pointer-events: none; z-index: 201;"></div>
         <div style="z-index: 202; width: 100%; max-width: 600px; padding: 20px; text-align: left; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; justify-content: flex-end;" id="boot-text-container">
             <p id="boot-log-1" style="margin-bottom: 5px; display: none; font-size: 1rem;">ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM</p>

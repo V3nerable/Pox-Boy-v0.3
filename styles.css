@@ -414,3 +414,12 @@
     /* Tighten content gutters on narrow screens */
     .content-area { padding: 15px; }
 }
+
+/* ============ PORTRAIT KEYBOARD (v0.35) ============ */
+/* Phone-muscle-memory layout landed this version; portrait gets chunkier keys */
+@media (orientation: portrait) {
+    #keyboard-modal .modal-content { max-width: 700px; }
+    #keyboard-modal .vk-btn { padding: 14px 0 !important; font-size: 1.5rem !important; min-width: 28px; }
+    #vk-keys { gap: 7px !important; }
+    #vk-keys > div { gap: 6px !important; }
+}
