@@ -1141,62 +1141,37 @@
         const bootOptSizeBtn = document.getElementById('options-size-btn');
         if (bootOptSizeBtn) bootOptSizeBtn.innerText = `[SIZE: ${sizeLabels[sizeIndex]}]`;
 
-        // ================= ORIENTATION LOCK (v0.36, hardened v0.38) =================
-        // AUTO = follow the device; PORTRAIT / LANDSCAPE = user-forced lock, persisted
-        // across launches. v0.38 FLAP FIX (user-reported "briefly flips portrait/
-        // landscape"): every fullscreenchange used to re-fire lock()/unlock() blindly --
-        // and the fullscreen autopilot re-enters immersion after EVERY native-popup
-        // wedge, so each recovery cycle re-snapped the rotation even when nothing had
-        // changed. The engine now tracks the mode actually in effect and never re-fires
-        // it; leaving immersion re-arms it (the OS releases locks on exit) so re-entry
-        // locks exactly once. iOS still has no lock(): guard no-ops, label still syncs.
-        const orientationModes = ['auto', 'portrait', 'landscape'];
-        const orientationLabels = ['AUTO', 'PORTRAIT', 'LANDSCAPE'];
-        let orientationIndex = orientationModes.indexOf(localStorage.getItem('pipboy-orientation'));
-        if (orientationIndex < 0) orientationIndex = 0;
-        let orientationAppliedMode = null; // what is verifiably in effect right now
+        // ================= PORTRAIT LOCK (v0.40) =================
+        // v0.36-0.39 offered AUTO / PORTRAIT / LANDSCAPE as a user cycle in OPTIONS.
+        // Per user direction: PORTRAIT IS THE ONLY MODE. The options button is retired,
+        // the manifest is hard portrait, and this engine forces the lock whenever
+        // immersion allows. The v0.38 anti-flap logic is KEPT: leaving immersion re-arms
+        // and re-entry locks exactly ONCE -- never on every fullscreenchange. The dormant
+        // landscape media queries stay in styles.css (inert under the lock; desktop
+        // preview windows still get them) -- full exorcism is a post-event cleanup.
+        // iOS has no lock() API: guard no-ops; the manifest portrait hint still applies.
+        let portraitLockApplied = false;
 
-        function syncOrientationLabel() {
-            const optOrientBtn = document.getElementById('options-orient-btn');
-            if (optOrientBtn) optOrientBtn.innerText = `[ORIENTATION: ${orientationLabels[orientationIndex]}]`;
-        }
-
-        function applyOrientationLock() {
-            if (!(screen.orientation && typeof screen.orientation.lock === 'function')) { syncOrientationLabel(); return; }
-            const mode = orientationModes[orientationIndex];
+        function applyPortraitLock() {
+            if (!(screen.orientation && typeof screen.orientation.lock === 'function')) return;
             const immersed = (typeof getFsElement === 'function' && getFsElement()) || getDisplayMode() !== 'browser';
-            if (!immersed) { orientationAppliedMode = null; syncOrientationLabel(); return; } // OS released any lock; re-arm for next immersion
-            if (mode === orientationAppliedMode) { syncOrientationLabel(); return; } // already in effect -- do NOT snap the screen again
-            if (mode === 'auto') {
-                try { screen.orientation.unlock(); } catch (e) {}
-                orientationAppliedMode = 'auto';
-            } else {
-                try {
-                    const p = screen.orientation.lock(mode);
-                    if (p && p.then) {
-                        p.then(function(){ orientationAppliedMode = mode; }, function(){ /* rejected outside immersion: stays armed, fullscreenchange retries */ });
-                    } else {
-                        orientationAppliedMode = mode;
-                    }
-                } catch (e) {}
-            }
-            syncOrientationLabel();
+            if (!immersed) { portraitLockApplied = false; return; } // OS released the lock; re-arm for re-entry
+            if (portraitLockApplied) return; // already vertical -- never re-snap the screen
+            try {
+                const p = screen.orientation.lock('portrait');
+                if (p && p.then) {
+                    p.then(function(){ portraitLockApplied = true; }, function(){ /* rejected outside immersion: stays armed, fullscreenchange retries */ });
+                } else {
+                    portraitLockApplied = true;
+                }
+            } catch (e) {}
         }
 
-        function cycleOrientation() {
-            orientationIndex = (orientationIndex + 1) % orientationModes.length;
-            localStorage.setItem('pipboy-orientation', orientationModes[orientationIndex]);
-            applyOrientationLock();
-            showNotification(`ORIENTATION: ${orientationLabels[orientationIndex]}${orientationIndex === 0 ? ' (FOLLOWS DEVICE)' : ' LOCKED'}`);
-        }
-
-        // Re-apply the saved preference whenever immersion flips -- ONE snap per change,
-        // not one per fullscreenchange event (that was the flap).
         ['fullscreenchange', 'webkitfullscreenchange'].forEach(function(evt) {
-            document.addEventListener(evt, applyOrientationLock);
+            document.addEventListener(evt, applyPortraitLock);
         });
 
-        applyOrientationLock(); // boot: paint the label + engage the lock if already immersed
+        applyPortraitLock(); // boot: engage the lock immediately if already immersed
 
         // Inventory Logic
         function renderInventory(category) {
