@@ -436,3 +436,27 @@
     #vk-keys { gap: 7px !important; }
     #vk-keys > div { gap: 6px !important; }
 }
+
+/* ============ PORTRAIT SHIELD (v0.41) ============ */
+/* Backstop for when the OS refuses the portrait lock (browser tabs, auto-rotate,
+   Android's nav-bar "rotate app" button, stale WebAPKs): when the device REPORTS a
+   rotated orientation angle, the whole app counter-rotates so it still READS portrait
+   (engaged by portraitShieldCheck() in app.js via html.plock-* classes). Axis math:
+   body swaps to width:100vh / height:100vw and rotates about a pinned corner so the
+   box exactly refills the rotated viewport; percentage-sized children re-fit
+   naturally. Large vh-sized surfaces get swapped overrides below. The v0.40 lock
+   remains PRIMARY -- when it wins, angle stays 0 and none of this ever triggers. */
+html.plock-90 body,
+html.plock-270 body {
+    position: fixed !important;
+    width: 100vh !important;
+    height: 100vw !important;
+    margin: 0 !important;
+    overflow: hidden;
+}
+html.plock-90 body  { top: 100%; left: 0;    transform-origin: left top; transform: rotate(-90deg); }
+html.plock-270 body { top: 0;    left: 100%; transform-origin: left top; transform: rotate(90deg); }
+/* viewport-unit axis swap for the biggest vh-sized surfaces */
+html.plock-90 #map-container, html.plock-270 #map-container { height: 44vw !important; min-height: 300px; }
+html.plock-90 .modal-content, html.plock-270 .modal-content { max-height: 90vw; }
+html.plock-90 #pre-boot-box,  html.plock-270 #pre-boot-box  { max-height: 96vw !important; }

@@ -1173,6 +1173,35 @@
 
         applyPortraitLock(); // boot: engage the lock immediately if already immersed
 
+        // ================= PORTRAIT SHIELD (v0.41) =================
+        // The OS does not always obey the v0.40 lock: browser tabs without fullscreen
+        // rotate freely, Android auto-rotate and the nav-bar "rotate app" button both
+        // override a mere lock() request, and a stale WebAPK ignores the new manifest
+        // until Chrome re-mints it. So we stop negotiating: whenever the device REPORTS
+        // a rotated angle (90/270), html.plock-* CSS counter-rotates the entire app so
+        // it still READS portrait. Desktop angle never leaves 0, so wide preview
+        // windows are untouched. The lock stays PRIMARY (when it wins, angle is 0 and
+        // the shield never engages) -- this is the guaranteed backstop.
+        function portraitShieldCheck() {
+            let a = null;
+            if (screen.orientation && typeof screen.orientation.angle === 'number') {
+                a = screen.orientation.angle;
+            } else if (typeof window.orientation === 'number') { // legacy iOS fallback
+                a = window.orientation;
+            } else {
+                return;
+            }
+            a = ((a % 360) + 360) % 360;
+            document.documentElement.classList.toggle('plock-90', a === 90);
+            document.documentElement.classList.toggle('plock-270', a === 270);
+        }
+        if (screen.orientation && screen.orientation.addEventListener) {
+            screen.orientation.addEventListener('change', portraitShieldCheck);
+        }
+        window.addEventListener('orientationchange', portraitShieldCheck); // older engines
+        window.addEventListener('resize', portraitShieldCheck); // final safety net
+        portraitShieldCheck();
+
         // Inventory Logic
         function renderInventory(category) {
             const container = document.getElementById('inv-container');
