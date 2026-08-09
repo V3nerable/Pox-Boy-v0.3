@@ -1073,31 +1073,40 @@
         window.addEventListener('resize', updateFsButtons);
         document.addEventListener('visibilitychange', updateFsButtons);
 
-        // ---- AUTOPILOT (v0.25): the app WANTS permanent fullscreen ----
-        // Installed app modes default to always-on. When a phone popup (GPS / camera
-        // permission) rips DOM fullscreen away, the NEXT real human tap anywhere re-enters
-        // it -- no app restart, no dead [RESUME FULL] button. Explicit [EXIT FULL] stands
-        // the autopilot down until fullscreen is requested again.
-        fsIntent = (getDisplayMode() !== 'browser');
+        // ---- AUTOPILOT (v0.25, CALM-DOWN v0.42) ----
+        // v0.42 (user-reported): the repeated "swipe down to exit fullscreen" hint and the
+        // actual/almost-fullscreen jumping were both children of an OVER-EAGER autopilot --
+        // it re-entered DOM fullscreen on EVERY tap (1.5s throttle) and after every popup
+        // wedge, and each re-entry re-toasts Android's immersive hint. New policy:
+        //   A) OS-immersive installs (display-mode: fullscreen) get NO DOM fullscreen at
+        //      all -- the OS is already hiding the bars; DOM fullscreen on top was pure
+        //      toast spam. fsIntent no longer arms in that mode and the pilot stands down.
+        //   B) Re-entry is LOSS-DRIVEN (fullscreenchange events + app-switch return +
+        //      resize), never every-tap, with a 5s cooldown. Recovery still happens after
+        //      GPS/camera popup wedges -- just within a breath instead of instantly.
+        fsIntent = (getDisplayMode() === 'standalone');
 
         let fsLastAutoAttempt = 0;
+        let fsAutoInFlight = false;
         function fsAutoPilot() {
-            if (!fsIntent || fsBusy || !isFsApiSupported()) return;
-            if (getFsElement()) return; // already there
+            if (getDisplayMode() === 'fullscreen') return; // A: OS already immersive -- nothing to do
+            if (!fsIntent || fsBusy || fsAutoInFlight || !isFsApiSupported()) return;
+            if (isActuallyFullscreen()) return; // fused truth also catches the wedge lie
             const now = Date.now();
-            if (now - fsLastAutoAttempt < 1500) return; // throttle: one attempt per 1.5s max
+            if (now - fsLastAutoAttempt < 5000) return; // B: calm cooldown (was 1.5s)
             fsLastAutoAttempt = now;
-            try {
-                const p = getFsRequestFn().call(document.documentElement, { navigationUI: 'hide' });
-                if (p && p.catch) p.catch(function(){});
-            } catch (e) { /* no activation on this event; next human tap retries */ }
+            fsAutoInFlight = true;
+            // enterFullscreen() carries the wedge-UNSTICK path (phantom exit + re-request),
+            // which the old raw-request pilot never had
+            enterFullscreen(false).finally(function(){ fsAutoInFlight = false; });
         }
 
-        // Guaranteed re-entry points: every genuine user touch. (The geolocation/camera
-        // permission callbacks that fire when popups close carry NO user activation, which
-        // is why popup-adjacent re-entry attempts keep getting rejected by the browser.)
-        document.addEventListener('pointerdown', fsAutoPilot, true);
-        document.addEventListener('touchend', fsAutoPilot, true);
+        // B: re-entry triggers are genuine LOSS events -- not every human touch. (The old
+        // pointerdown/touchend capture listeners are deleted: they were the toast engine.)
+        ['fullscreenchange', 'webkitfullscreenchange'].forEach(function(evt) {
+            document.addEventListener(evt, fsAutoPilot);
+        });
+        window.addEventListener('resize', fsAutoPilot); // covers popup-wedge visual exits
         document.addEventListener('visibilitychange', function() {
             if (!document.hidden) { fsAutoPilot(); updateFsButtons(); }
         });
@@ -2745,119 +2754,218 @@
             document.getElementById('cam-save-controls').style.display = 'none';
         }
 
-        function takePhoto() {
+        async function takePhoto() {
             const video = document.getElementById('cam-video');
-            const canvas = document.getElementById('cam-canvas');
-            
-            // Set canvas to exact video dimensions
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            
-            // Draw current video frame to canvas
-            const ctx = canvas.getContext('2d');
+            // v0.43 RACE GUARD (was "flipping stops being able to save photos"): a flip or
+            // restart leaves the element mid-wake with a 0x0 frame, and the old code
+            // happily 'saved' black nothing -- or wedged. Wait for a REAL frame instead.
+            if (!rawVideoStream || !video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+                showNotification('SENSOR RESTARTING -- HOLD POSITION...');
+                return;
+            }
+            // v0.43 SELFIE SCREEN-FLASH: front sensors have no torch -- in NIGHT MODE the
+            // whole screen floods pale for a beat as the light, and we shoot mid-flash.
+            const isFront = (currentFacingMode === 'user');
+            const flash = document.getElementById('cam-screenflash');
+            if (camNightMode && isFront && flash) {
+                flash.style.display = 'block';
+                await new Promise(r => setTimeout(r, 180));
+            }
+            try {
+                const canvas = document.getElementById('cam-canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
 
-            // If using the front-facing camera, we need to flip the canvas horizontally 
-            // so the photo doesn't save backwards!
-            if (currentFacingMode === 'user') {
-                ctx.translate(canvas.width, 0);
-                ctx.scale(-1, 1);
+                // Front-facing: mirror the frame so the photo doesn't save backwards
+                if (isFront) {
+                    ctx.translate(canvas.width, 0);
+                    ctx.scale(-1, 1);
+                }
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+                // v0.43: capture auto-archives BOTH versions instantly -- no separate
+                // save step exists anymore, so 'save' is live by construction
+                archiveShot(canvas);
+
+                // Freeze on the picture + release the sensor (battery)
+                video.style.display = 'none';
+                canvas.style.display = 'block';
+                if (rawVideoStream) {
+                    rawVideoStream.getTracks().forEach(track => track.stop());
+                    rawVideoStream = null;
+                }
+                document.getElementById('cam-snap-btn').style.display = 'none';
+                document.getElementById('cam-flip-btn').style.display = 'none';
+                document.getElementById('cam-save-controls').style.display = 'flex';
+            } catch (err) {
+                showNotification('CAPTURE FAILED: ' + String((err && err.message) || 'SENSOR ERROR').toUpperCase());
+            } finally {
+                if (flash) flash.style.display = 'none';
             }
-            
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            // Reset transform just in case
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            
-            // Swap display so it freezes on the picture
-            video.style.display = 'none';
-            canvas.style.display = 'block';
-            
-            // We can now stop the video stream to save battery while they look at the picture
-            if (rawVideoStream) {
-                rawVideoStream.getTracks().forEach(track => track.stop());
-                rawVideoStream = null;
-            }
-            
-            document.getElementById('cam-snap-btn').style.display = 'none';
-            document.getElementById('cam-flip-btn').style.display = 'none';
-            document.getElementById('cam-save-controls').style.display = 'flex';
         }
 
         function resetCamera() {
             document.getElementById('cam-canvas').style.display = 'none';
             document.getElementById('cam-save-controls').style.display = 'none';
-            
-            // Reset button states for next photo
-            document.getElementById('cam-download-btn').style.display = 'block';
-            document.getElementById('cam-next-btn').style.display = 'none';
-            
             startCamera(); // Reboot the feed
+        }
+
+        // Post-shot regret: drop the shot we just auto-archived, then back to the feed
+        function deleteLastShot() {
+            if (photoArchive.length) {
+                photoArchive.shift();
+                try { localStorage.setItem('pipboy-photos', JSON.stringify(photoArchive)); } catch (e) {}
+                renderPhotoGallery();
+                showNotification('LAST SHOT DELETED FROM DATABANK.');
+            }
+            resetCamera();
         }
 
         let photoArchive = JSON.parse(localStorage.getItem('pipboy-photos')) || [];
 
-        function savePhoto() {
-            const canvas = document.getElementById('cam-canvas');
-            
-            // Create a temporary hidden off-screen canvas to permanently bake the CSS filters into the image data
-            const bakedCanvas = document.createElement('canvas');
-            
-            // To prevent massive base64 strings from maxing out the 5MB localStorage limit instantly,
-            // we will aggressively downscale the "Databank" image to look like a tiny, pixelated retro image!
-            const scaleFactor = 0.5; // Cut resolution in half
-            bakedCanvas.width = canvas.width * scaleFactor;
-            bakedCanvas.height = canvas.height * scaleFactor;
-            const ctx = bakedCanvas.getContext('2d');
-            
-            // Draw a black background first just in case
-            ctx.fillStyle = "black";
-            ctx.fillRect(0, 0, bakedCanvas.width, bakedCanvas.height);
-            
-            // Bake the CURRENT theme's sensor tint into the saved image
-            ctx.filter = themes[currentThemeIndex].camFx;
-            ctx.drawImage(canvas, 0, 0, bakedCanvas.width, bakedCanvas.height);
+        // ================= v0.43 DUAL-CAPTURE ARCHIVE ENGINE =================
+        // One capture -> TWO artifacts in the DATABANK as one paired entry {pip, raw}:
+        //   RAW = unfiltered full-res truth + subtle timestamp
+        //   PIP = theme-baked (camFx + NIGHT MODE gain), downscaled, watermarked,
+        //         timestamped phosphor artifact
+        // DATABANK entry shape migrated: legacy entries were bare dataURL strings;
+        // entryPip()/entryRaw() read both shapes so old shots never break.
+        function entryPip(e) { return (typeof e === 'string') ? e : (e.pip || e.raw || ''); }
+        function entryRaw(e) { return (e && typeof e === 'object') ? (e.raw || null) : null; }
 
-            // Add a Pip-Boy watermark overlay before saving (theme-coloured)
-            ctx.filter = "none"; // reset filter for text
-            ctx.fillStyle = themes[currentThemeIndex].hex;
-            ctx.font = "20px 'Courier New', Courier, monospace";
-            ctx.fillText("POX-BOY 3026 OS", 10, 30);
+        function stampTimestamp(ctx, w, h, color, alpha) {
+            const now = new Date();
+            const p2 = n => String(n).padStart(2, '0');
+            // In-fiction year offset: 2026 -> 2287, matching the pip-clock's world
+            const stamp = `${p2(now.getDate())}.${p2(now.getMonth() + 1)}.${now.getFullYear() + 261} ${p2(now.getHours())}:${p2(now.getMinutes())}`;
+            const size = Math.max(14, Math.floor(w / 45));
+            ctx.save();
+            ctx.filter = 'none';
+            ctx.globalAlpha = alpha; // subtle by design: readable when sought, invisible when not
+            ctx.fillStyle = color;
+            ctx.font = `${size}px 'Courier New', Courier, monospace`;
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(stamp, w - size, h - size);
+            ctx.restore();
+        }
 
-            // Convert baked canvas to low-quality JPEG to save huge amounts of space
-            const dataURL = bakedCanvas.toDataURL('image/jpeg', 0.6);
-            
-            // Trigger download of the compressed file
-            const a = document.createElement('a');
-            a.href = dataURL;
-            a.download = `Wasteland_Snapshot_${Date.now()}.jpg`;
-            document.body.appendChild(a);
-            a.click();
-
-            // Save to in-app archive
-            photoArchive.unshift(dataURL);
-            
-            // Safety check: if localStorage is full, remove oldest images until it fits
+        function archiveShot(canvas) {
+            const t = themes[currentThemeIndex];
+            let pipURL = null, rawURL = null;
+            // RAW -- also doubles as the emergency fallback path
             try {
-                localStorage.setItem('pipboy-photos', JSON.stringify(photoArchive));
-            } catch (e) {
-                while (photoArchive.length > 0) {
-                    photoArchive.pop();
-                    try {
-                        localStorage.setItem('pipboy-photos', JSON.stringify(photoArchive));
-                        break;
-                    } catch (e2) {
-                        continue;
+                const raw = document.createElement('canvas');
+                raw.width = canvas.width; raw.height = canvas.height;
+                const rctx = raw.getContext('2d');
+                rctx.drawImage(canvas, 0, 0);
+                stampTimestamp(rctx, raw.width, raw.height, '#dddddd', 0.45);
+                rawURL = raw.toDataURL('image/jpeg', 0.82);
+            } catch (e) { rawURL = null; }
+            // PIP -- theme phosphor crush + watermark + timestamp
+            try {
+                const sf = 0.5;
+                const baked = document.createElement('canvas');
+                baked.width = Math.max(1, Math.floor(canvas.width * sf));
+                baked.height = Math.max(1, Math.floor(canvas.height * sf));
+                const bctx = baked.getContext('2d');
+                bctx.fillStyle = 'black';
+                bctx.fillRect(0, 0, baked.width, baked.height);
+                bctx.filter = t.camFx + (camNightMode ? ' brightness(2.0) saturate(0.75)' : '');
+                bctx.drawImage(canvas, 0, 0, baked.width, baked.height);
+                bctx.filter = 'none';
+                bctx.fillStyle = t.hex;
+                bctx.font = "20px 'Courier New', Courier, monospace";
+                bctx.fillText('POX-BOY 3026 OS', 10, 30);
+                stampTimestamp(bctx, baked.width, baked.height, t.hex, 0.45);
+                pipURL = baked.toDataURL('image/jpeg', 0.6);
+            } catch (e) { pipURL = null; }
+            // GUARANTEE last resort: raw frame straight off the capture canvas
+            if (!pipURL && !rawURL) {
+                try { rawURL = canvas.toDataURL('image/jpeg', 0.7); } catch (e) {}
+            }
+            if (!pipURL && !rawURL) {
+                showNotification('PHOTO LOST: SENSOR FRAME UNREADABLE.'); // LOUD failure, never silent
+                return false;
+            }
+            archiveEntry({ pip: pipURL, raw: rawURL });
+            return true;
+        }
+
+        function archiveEntry(entry) {
+            photoArchive.unshift(entry);
+            let pruned = 0;
+            for (;;) {
+                try { localStorage.setItem('pipboy-photos', JSON.stringify(photoArchive)); break; }
+                catch (e) {
+                    if (photoArchive.length <= 1) {
+                        photoArchive.shift();
+                        showNotification('DATABANK FULL -- DELETE OLD SHOTS.');
+                        return;
                     }
+                    photoArchive.pop(); pruned++;
                 }
             }
-
-            document.body.removeChild(a);
-            
-            document.getElementById('cam-download-btn').style.display = 'none';
-            document.getElementById('cam-next-btn').style.display = 'block';
-            
-            showNotification("IMAGE SAVED TO DEVICE DATABANKS AND ARCHIVE.");
+            if (pruned) showNotification('DATABANK PRESSURE: ' + pruned + ' OLDEST SHOT' + (pruned > 1 ? 'S' : '') + ' PURGED.');
+            renderPhotoGallery();
+            const saved = photoArchive[0];
+            showNotification('PHOTO SECURED: ' + (saved.raw && saved.pip ? 'RAW + PIP ' : '') + '(' + photoArchive.length + ' IN DATABANK).');
+            if (localStorage.getItem('pipboy-auto-export') === '1') exportEntry(saved);
         }
+
+        // ================= GALLERY EXPORT / SHARE (v0.43) =================
+        function downloadDataUrl(dataURL, filename) {
+            if (!dataURL) return;
+            const a = document.createElement('a');
+            a.href = dataURL;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        function exportEntry(entry) {
+            const stamp = Date.now();
+            downloadDataUrl(entryPip(entry), `POXBOY_${stamp}_PIP.jpg`);
+            const raw = entryRaw(entry);
+            if (raw) downloadDataUrl(raw, `POXBOY_${stamp}_RAW.jpg`);
+            coachExportOnce();
+        }
+
+        // One-time coaching: files land in Download (gallery apps index it), and Chrome's
+        // "download complete" pings can be silenced at the OS level once, forever.
+        function coachExportOnce() {
+            if (localStorage.getItem('pipboy-export-coached')) return;
+            localStorage.setItem('pipboy-export-coached', '1');
+            showCustomPrompt('EXPORTS LAND IN YOUR DOWNLOAD FOLDER -- GALLERY APPS INDEX IT AUTOMATICALLY. FOR SILENT FUTURE EXPORTS: LONG-PRESS THE NEXT DOWNLOAD NOTIFICATION AND TURN OFF "DOWNLOADS" PINGS.', [
+                { label: 'UNDERSTOOD', action: () => {} }
+            ]);
+        }
+
+        function dataUrlToFile(dataURL, name) {
+            const arr = dataURL.split(',');
+            const mime = (arr[0].match(/:(.*?);/) || [])[1] || 'image/jpeg';
+            const bstr = atob(arr[1]);
+            const u8 = new Uint8Array(bstr.length);
+            for (let i = 0; i < bstr.length; i++) u8[i] = bstr.charCodeAt(i);
+            return new File([u8], name, { type: mime });
+        }
+
+        // OPTIONS cycle
+        function cycleAutoExport() {
+            const on = localStorage.getItem('pipboy-auto-export') !== '1';
+            localStorage.setItem('pipboy-auto-export', on ? '1' : '0');
+            const btn = document.getElementById('options-export-btn');
+            if (btn) btn.innerText = `[AUTO-EXPORT: ${on ? 'ON' : 'OFF'}]`;
+            showNotification('AUTO-EXPORT ' + (on ? 'ON -- EVERY SHOT ALSO FILES TO THE GALLERY-INDEXED DOWNLOAD FOLDER.' : 'OFF.'));
+        }
+        // Boot label sync
+        (function() {
+            const b = document.getElementById('options-export-btn');
+            if (b && localStorage.getItem('pipboy-auto-export') === '1') b.innerText = '[AUTO-EXPORT: ON]';
+        })();
 
         function renderPhotoGallery() {
             const galleryEl = document.getElementById('inline-photo-gallery');
@@ -2871,9 +2979,10 @@
             }
 
             // Small tiles; tapping one opens the fullscreen-ish viewer modal
+            // (v0.43: tiles always show the PIP version; RAW lives behind the viewer toggle)
             let html = '<div class="photo-tile-grid">';
-            photoArchive.forEach((url, idx) => {
-                html += `<div class="photo-tile" onclick="openPhotoViewer(${idx})"><img src="${url}" alt="ARCHIVE ${idx + 1}"></div>`;
+            photoArchive.forEach((entry, idx) => {
+                html += `<div class="photo-tile" onclick="openPhotoViewer(${idx})"><img src="${entryPip(entry)}" alt="ARCHIVE ${idx + 1}"></div>`;
             });
             html += '</div>';
             galleryEl.innerHTML = html;
@@ -2881,12 +2990,55 @@
 
         // Databank fullscreen viewer (image always fits: max 78vh, no scrolling)
         let viewerPhotoIdx = null;
+        let viewerShowingRaw = false; // v0.43: PIP vs RAW flip state
 
         function openPhotoViewer(idx) {
             if (idx < 0 || idx >= photoArchive.length) return;
             viewerPhotoIdx = idx;
-            document.getElementById('photo-viewer-img').src = photoArchive[idx];
+            viewerShowingRaw = false;
+            refreshViewer();
             document.getElementById('photo-viewer-modal').style.display = 'flex';
+        }
+
+        function refreshViewer() {
+            const entry = photoArchive[viewerPhotoIdx];
+            const raw = entryRaw(entry);
+            document.getElementById('photo-viewer-img').src = (viewerShowingRaw && raw) ? raw : entryPip(entry);
+            const tog = document.getElementById('photo-viewer-toggle');
+            if (tog) {
+                tog.style.display = raw ? 'block' : 'none'; // hidden for legacy/mail-received (PIP-only) shots
+                tog.innerText = viewerShowingRaw ? 'VIEW PIP-BOY VERSION' : 'VIEW ORIGINAL';
+            }
+        }
+
+        function toggleViewerVersion() {
+            viewerShowingRaw = !viewerShowingRaw;
+            refreshViewer();
+        }
+
+        function exportViewerPhoto() {
+            if (viewerPhotoIdx === null) return;
+            exportEntry(photoArchive[viewerPhotoIdx]);
+            showNotification('IMAGE EXPORTED TO DOWNLOAD FOLDER.');
+        }
+
+        // Shares the version currently on screen; iOS can save straight to Photos,
+        // elsewhere the share sheet beats a noisy download every time
+        function shareViewerPhoto() {
+            if (viewerPhotoIdx === null) return;
+            const entry = photoArchive[viewerPhotoIdx];
+            const raw = entryRaw(entry);
+            const url = (viewerShowingRaw && raw) ? raw : entryPip(entry);
+            if (!url) return;
+            try {
+                const file = dataUrlToFile(url, `POXBOY_${Date.now()}.jpg`);
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    navigator.share({ files: [file] }).catch(() => {});
+                    return;
+                }
+            } catch (e) {}
+            showNotification('SHARE NOT SUPPORTED HERE -- EXPORTED INSTEAD.');
+            exportEntry(entry);
         }
 
         function closePhotoViewer() {

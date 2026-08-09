@@ -54,7 +54,7 @@
         <div style="display: flex; flex-direction: column;">
             <div style="display: flex; align-items: baseline; gap: 10px;">
                 <span class="header-title" id="main-os-title">POX-BOY 3026</span>
-                <span style="font-size: 0.8rem; opacity: 0.5;">v0.41</span>
+                <span style="font-size: 0.8rem; opacity: 0.5;">v0.43</span>
             </div>
             <span id="pip-clock" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px;"></span>
             <span id="pip-batt" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px; display: none;"></span>
@@ -172,7 +172,8 @@
                 <button class="pip-btn" id="options-fs-btn" onclick="toggleFullscreen()" style="border-style: dashed;">[FULLSCREEN]</button>
                 <button class="pip-btn" id="options-size-btn" onclick="cycleSize()" style="border-style: dashed;">[SIZE: SHRINK 2]</button>
                 <button class="pip-btn" id="options-theme-btn" onclick="cycleTheme()" style="border-style: dashed;">[THEME: GREEN]</button>
-                <p style="font-size: 0.9rem; opacity: 0.7; margin-top: 15px; line-height: 1.4;">PADDING cycles MAX / SHRINK 1 / SHRINK 2 and persists. THEME tints the phosphor, map and optics. THIS UNIT IS PORTRAIT-ONLY: the display re-aligns itself automatically on any device that lets it. FULLSCREEN works on any device that supports it — on iPhone it lives behind "ADD TO HOME SCREEN" instead. Hidden when the OS already locks immersion.</p>
+                <button class="pip-btn" id="options-export-btn" onclick="cycleAutoExport()" style="border-style: dashed;">[AUTO-EXPORT: OFF]</button>
+                <p style="font-size: 0.9rem; opacity: 0.7; margin-top: 15px; line-height: 1.4;">PADDING cycles MAX / SHRINK 1 / SHRINK 2 and persists. THEME tints the phosphor, map and optics. AUTO-EXPORT also files every shot to your gallery-indexed download folder the moment it's taken. THIS UNIT IS PORTRAIT-ONLY: the display re-aligns itself automatically on any device that lets it. FULLSCREEN works on any device that supports it — on iPhone it lives behind "ADD TO HOME SCREEN" instead. Hidden when the OS already locks immersion.</p>
             </div>
 
             <!-- QUESTS -->
@@ -296,9 +297,9 @@
                         <button class="pip-btn" id="cam-exit-btn" onclick="stopCamera()" style="font-weight: bold; color: #ff3333; border-color: #ff3333;">X POWER OFF</button>
                         
                         <div id="cam-save-controls" style="display: none; flex-direction: column; gap: 10px; margin-top: 10px; border-top: 1px dashed var(--pip-color-dim); padding-top: 10px;">
-                            <button class="pip-btn" id="cam-download-btn" onclick="savePhoto()" style="margin: 0; border-color: #42b6ff; color: #42b6ff;">SAVE TO DATABANK</button>
-                            <button class="pip-btn" id="cam-next-btn" onclick="resetCamera()" style="display: none; margin: 0; border-style: dashed;">TAKE ANOTHER</button>
-                            <button class="pip-btn" onclick="resetCamera()" style="margin: 0; border-color: #ff3333; color: #ff3333;">DISCARD</button>
+                            <!-- v0.43: CAPTURE auto-archives instantly -- post-shot = resume or regret -->
+                            <button class="pip-btn" id="cam-next-btn" onclick="resetCamera()" style="margin: 0; border-style: dashed;">TAKE ANOTHER</button>
+                            <button class="pip-btn" id="cam-delete-btn" onclick="deleteLastShot()" style="margin: 0; border-color: #ff3333; color: #ff3333;">DELETE THIS SHOT</button>
                         </div>
                     </div>
                 </div>
@@ -442,6 +443,10 @@
             <button class="pip-btn" onclick="closeModals()" style="margin-top: 15px; border-style: dashed;">CANCEL</button>
         </div>
     </div>
+
+    <!-- v0.43: SELFIE SCREEN-FLASH -- front sensors have no torch, so capturing in
+         NIGHT MODE floods the whole screen pale for a beat as the makeshift light -->
+    <div id="cam-screenflash" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: #fff8f0; opacity: 0.92; z-index: 100002; pointer-events: none;"></div>
 
     <!-- CUSTOM VIRTUAL KEYBOARD MODAL -->
     <div id="keyboard-modal" class="modal-overlay" style="z-index: 1000; align-items: flex-end; padding: 5px;">
@@ -757,9 +762,12 @@
     <div id="photo-viewer-modal" class="modal-overlay" style="z-index: 110; padding: 8px;" onclick="closePhotoViewer()">
         <div style="display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 95vw; max-height: 94vh;" onclick="event.stopPropagation();">
             <img id="photo-viewer-img" alt="DATABANK IMAGE" style="max-width: 100%; max-height: 78vh; object-fit: contain; border: 2px solid var(--pip-color); background: #000; box-shadow: 0 0 18px var(--pip-color-dim);">
-            <div style="display: flex; gap: 10px; width: 100%; max-width: 420px;">
-                <button class="pip-btn" id="photo-viewer-delete" onclick="deleteViewerPhoto()" style="margin: 0; border-color: #ff3333; color: #ff3333;">DELETE IMAGE</button>
-                <button class="pip-btn" onclick="closePhotoViewer()" style="margin: 0; border-style: dashed;">CLOSE VIEWER</button>
+            <div style="display: flex; gap: 10px; width: 100%; max-width: 420px; flex-wrap: wrap; justify-content: center;">
+                <button class="pip-btn" id="photo-viewer-toggle" onclick="toggleViewerVersion()" style="margin: 0; display: none; border-color: #42b6ff; color: #42b6ff;">VIEW ORIGINAL</button>
+                <button class="pip-btn" id="photo-viewer-export" onclick="exportViewerPhoto()" style="margin: 0; border-color: #42b6ff; color: #42b6ff;">EXPORT</button>
+                <button class="pip-btn" id="photo-viewer-share" onclick="shareViewerPhoto()" style="margin: 0; border-color: #42b6ff; color: #42b6ff;">SHARE</button>
+                <button class="pip-btn" id="photo-viewer-delete" onclick="deleteViewerPhoto()" style="margin: 0; border-color: #ff3333; color: #ff3333;">DELETE</button>
+                <button class="pip-btn" onclick="closePhotoViewer()" style="margin: 0; border-style: dashed;">CLOSE</button>
             </div>
         </div>
     </div>
@@ -777,7 +785,7 @@
     <div id="pre-boot-overlay" class="modal-overlay" style="z-index: 250; background: var(--pip-bg); flex-direction: column; display: none;">
         <!-- Version Tag & Dev Skip Button -->
         <div style="position: absolute; top: 10px; right: 10px; z-index: 260; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-            <span style="font-size: 0.8rem; opacity: 0.5;">v0.41</span>
+            <span style="font-size: 0.8rem; opacity: 0.5;">v0.43</span>
             <button class="pip-btn" onclick="devSkipToApp()" style="font-size: 0.7rem; padding: 2px 5px; border: none; color: #ff3333; opacity: 0.5;">[DEV: FAST BOOT]</button>
         </div>
         
@@ -799,7 +807,7 @@
 
     <!-- BOOT SPLASH SCREEN -->
     <div id="boot-splash" class="modal-overlay" style="z-index: 200; background: var(--pip-bg); flex-direction: column; display: flex;">
-        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.41</span>
+        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.43</span>
         <div class="crt" style="position: absolute; top:0; left:0; right:0; bottom:0; pointer-events: none; z-index: 201;"></div>
         <div style="z-index: 202; width: 100%; max-width: 600px; padding: 20px; text-align: left; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; justify-content: flex-end;" id="boot-text-container">
             <p id="boot-log-1" style="margin-bottom: 5px; display: none; font-size: 1rem;">ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM</p>
