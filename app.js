@@ -16,7 +16,16 @@
             
             inputEl.value = activeVkTarget.value;
             vkCursorPos = activeVkTarget.value.length;
+            autoGrowEl(activeVkTarget); // v0.44: seated composer field sizes to its content
             document.getElementById('keyboard-modal').style.display = 'flex';
+        }
+
+        // v0.44: message field grows UPWARD as it fills (instead of hiding overflow),
+        // capped at 40vh so the keyboard + buttons never leave the screen
+        function autoGrowEl(el) {
+            if (!el || !el.classList || !el.classList.contains('grow')) return;
+            el.style.height = 'auto';
+            el.style.height = Math.min(el.scrollHeight, Math.floor(window.innerHeight * 0.4)) + 'px';
         }
 
         function vkPress(char) {
@@ -27,6 +36,7 @@
             
             // Auto update target so passwords look responsive
             if (activeVkTarget) activeVkTarget.value = input.value;
+            autoGrowEl(activeVkTarget);
         }
 
         function vkBackspace() {
@@ -37,6 +47,7 @@
                 vkCursorPos--;
             }
             if (activeVkTarget) activeVkTarget.value = input.value;
+            autoGrowEl(activeVkTarget);
         }
 
         function vkConfirm() {
@@ -842,6 +853,7 @@
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
                 document.getElementById(`sub-${parentTab}-${subTabId}`).classList.add('active');
                 if (subTabId === 'quests') renderQuests();
+                if (subTabId === 'contracts') renderContracts();
                 if (subTabId === 'factions') renderFactions();
                 if (subTabId === 'stats') renderStatsTab();
                 if (subTabId === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
@@ -1299,6 +1311,33 @@
             } catch (e) { /* native notifications unavailable; in-app modal already shown */ }
         }
 
+        // ================= MAIL PING (v0.44, OPTIONS-gated) =================
+        // The unified notification surface: every NEW incoming transmission (msg / quest /
+        // item / held-quarantine) buzzes the OS -- but only when it adds signal. If you're
+        // already staring at the MAIL tab, the feed itself is the notification.
+        function mailPingEnabled() { return localStorage.getItem('pipboy-mail-ping') !== '0'; } // default ON
+        function mailPingOs(text) {
+            if (!mailPingEnabled()) return;
+            if (!document.hidden && mailTabActive()) return;
+            pushNativeNotification(text);
+        }
+        function cycleMailPing() {
+            const on = localStorage.getItem('pipboy-mail-ping') === '0';
+            localStorage.setItem('pipboy-mail-ping', on ? '1' : '0');
+            const btn = document.getElementById('options-ping-btn');
+            if (btn) btn.innerText = `[MAIL PING: ${on ? 'ON' : 'OFF'}]`;
+            showNotification('MAIL PING ' + (on ? 'ON.' : 'OFF.'));
+        }
+        function testMailPing() {
+            pushNativeNotification('TEST PING: MAIL PINGS ARE LIVE.');
+            showNotification('TEST PING FIRED.');
+        }
+        // Boot label sync (default ON)
+        (function() {
+            const b = document.getElementById('options-ping-btn');
+            if (b && localStorage.getItem('pipboy-mail-ping') === '0') b.innerText = '[MAIL PING: OFF]';
+        })();
+
         // Custom in-app confirmation replacement
         function showCustomPrompt(text, buttons) {
             document.getElementById('cp-text').innerText = text;
@@ -1700,6 +1739,15 @@
                         // "CONTRACT FULFILLED" on their next outbox status refresh.
                         if (quest.contractKey && window.db) {
                             try { window.firebaseSet(window.firebaseRef(window.db, 'mail/' + myMailUid + '/' + quest.contractKey + '/fulfilled'), true).catch(()=>{}); } catch(e){}
+                        }
+                        // v0.44 item-17: ALSO mail the giver a fulfil-notice letter so the
+                        // news arrives as an actual transmission (pings their MAIL PING),
+                        // not just an outbox status flip on their next lazy refresh
+                        if (quest.contractGiver) {
+                            queueMail(quest.contractGiver, 'msg', {
+                                text: 'CONTRACT FULFILLED: ' + quest.name + ' — BY ' + String(userProfile.name || 'UNKNOWN').toUpperCase(),
+                                fulfilledTitle: quest.name
+                            }, 'FULFILLED: ' + quest.name);
                         }
                         if (quest.giver && quest.giver !== "UNKNOWN WASTELANDER") {
                             const linkedFaction = factions.find(f => f.name === quest.giver);
@@ -2944,13 +2992,26 @@
             ]);
         }
 
-        function dataUrlToFile(dataURL, name) {
-            const arr = dataURL.split(',');
-            const mime = (arr[0].match(/:(.*?);/) || [])[1] || 'image/jpeg';
-            const bstr = atob(arr[1]);
-            const u8 = new Uint8Array(bstr.length);
-            for (let i = 0; i < bstr.length; i++) u8[i] = bstr.charCodeAt(i);
-            return new File([u8], name, { type: mime });
+        // v0.44 (user direction): per-image SHARE removed entirely, per-image EXPORT
+        // replaced by one bulk control on the CAM databank bar.
+        function exportAllPhotos() {
+            if (!photoArchive.length) return showNotification('DATABANK EMPTY.');
+            const jobs = [];
+            photoArchive.forEach((e, i) => {
+                jobs.push({ url: entryPip(e), name: `POXBOY_${i + 1}_PIP.jpg` });
+                const raw = entryRaw(e);
+                if (raw) jobs.push({ url: raw, name: `POXBOY_${i + 1}_RAW.jpg` });
+            });
+            showCustomPrompt(`EXPORT ALL ${jobs.length} IMAGES (PIP + RAW VERSIONS) TO YOUR DOWNLOAD FOLDER? TAP "ALLOW" IF THE BROWSER ASKS ABOUT MULTIPLE DOWNLOADS.`, [
+                {
+                    label: 'EXPORT ALL',
+                    action: () => {
+                        jobs.forEach((j, i) => setTimeout(() => downloadDataUrl(j.url, j.name), i * 350));
+                        coachExportOnce();
+                    }
+                },
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
         }
 
         // OPTIONS cycle
@@ -2966,6 +3027,28 @@
             const b = document.getElementById('options-export-btn');
             if (b && localStorage.getItem('pipboy-auto-export') === '1') b.innerText = '[AUTO-EXPORT: ON]';
         })();
+
+        // ================= TEXT SIZE CYCLE (v0.44) =================
+        // Every element in the app is rem-scaled, so the whole UI resizes from the root.
+        // 16px = the size every layout was tuned at; deploy is invisible until tapped.
+        // Persisted in pipboy-font-index, applied at boot.
+        const textSizes = ['16px', '18px', '20px'];   // NORMAL 100% / LARGE 112.5% / XL 125%
+        const textLabels = ['NORMAL', 'LARGE', 'XL'];
+        let textSizeIndex = (function() {
+            const i = parseInt(localStorage.getItem('pipboy-font-index'), 10);
+            return (i >= 0 && i < textSizes.length) ? i : 0;
+        })();
+        function applyTextSize() {
+            document.documentElement.style.fontSize = textSizes[textSizeIndex];
+            const btn = document.getElementById('options-text-btn');
+            if (btn) btn.innerText = `[TEXT: ${textLabels[textSizeIndex]}]`;
+        }
+        function cycleTextSize() {
+            textSizeIndex = (textSizeIndex + 1) % textSizes.length;
+            localStorage.setItem('pipboy-font-index', textSizeIndex);
+            applyTextSize();
+        }
+        applyTextSize(); // boot: apply persisted preference + paint the button
 
         function renderPhotoGallery() {
             const galleryEl = document.getElementById('inline-photo-gallery');
@@ -3014,31 +3097,6 @@
         function toggleViewerVersion() {
             viewerShowingRaw = !viewerShowingRaw;
             refreshViewer();
-        }
-
-        function exportViewerPhoto() {
-            if (viewerPhotoIdx === null) return;
-            exportEntry(photoArchive[viewerPhotoIdx]);
-            showNotification('IMAGE EXPORTED TO DOWNLOAD FOLDER.');
-        }
-
-        // Shares the version currently on screen; iOS can save straight to Photos,
-        // elsewhere the share sheet beats a noisy download every time
-        function shareViewerPhoto() {
-            if (viewerPhotoIdx === null) return;
-            const entry = photoArchive[viewerPhotoIdx];
-            const raw = entryRaw(entry);
-            const url = (viewerShowingRaw && raw) ? raw : entryPip(entry);
-            if (!url) return;
-            try {
-                const file = dataUrlToFile(url, `POXBOY_${Date.now()}.jpg`);
-                if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                    navigator.share({ files: [file] }).catch(() => {});
-                    return;
-                }
-            } catch (e) {}
-            showNotification('SHARE NOT SUPPORTED HERE -- EXPORTED INSTEAD.');
-            exportEntry(entry);
         }
 
         function closePhotoViewer() {
@@ -3388,12 +3446,16 @@
                     if (mailSeen.indexOf(key) === -1) {
                         mailSeen.push(key); changedSeen = true;
                         showNotification('INCOMING TRANSMISSION — ' + (l.fromName || 'UNKNOWN') + ': ' + typeSummary(l));
+                        mailPingOs('NEW TRANSMISSION FROM ' + (l.fromName || 'UNKNOWN') + ' -- ' + typeSummary(l));
+                        // v0.44: linked-sender photos land straight in the DATABANK at first sight
+                        if (l.type === 'msg' && l.payload && l.payload.photo) autoSaveMailPhoto(key);
                     }
                 } else {
                     stillUnverified[key] = l;
                     if (mailSeen.indexOf(key) === -1) {
                         mailSeen.push(key); changedSeen = true;
                         showNotification('UNTRUSTED TRANSMISSION HELD IN MAIL QUARANTINE. SCAN THEIR DATACARD TO UNLOCK.');
+                        mailPingOs('UNTRUSTED TRANSMISSION HELD IN MAIL QUARANTINE.');
                     }
                 }
             }
@@ -3451,8 +3513,20 @@
             if (!l) return;
             const from = (l.fromName || 'UNKNOWN');
             if (l.type === 'msg') {
+                // v0.44: fulfil notices get their own flow (option to complete YOUR copy too)
+                if (l.payload && l.payload.fulfilledTitle) { openFulfilNotice(key, l, src); return; }
+                // v0.44: photo transmissions land in the DATABANK when logged
+                if (l.payload && l.payload.photo) {
+                    showCustomPrompt(from + ' SENT A PHOTO TRANSMISSION. IT LANDS IN YOUR DATABANK.', [
+                        { label: 'LOG TRANSMISSION', action: () => acceptMsg(key, l) },
+                        { label: 'REPLY', action: () => composeTo('msg', safeUid(l.from)) },
+                        { label: 'DELETE', color: '#ff3333', action: () => declineLetter(key) }
+                    ]);
+                    return;
+                }
                 showCustomPrompt('MESSAGE FROM ' + from + ': "' + (l.payload.text || '') + '"', [
                     { label: 'LOG TRANSMISSION', action: () => acceptMsg(key, l) },
+                    { label: 'REPLY', action: () => composeTo('msg', safeUid(l.from)) },
                     { label: 'DELETE', color: '#ff3333', action: () => declineLetter(key) }
                 ]);
             } else if (l.type === 'quest') {
@@ -3471,13 +3545,57 @@
         }
 
         function acceptMsg(key, l) {
-            mailLog.unshift({ dir: 'in', uid: l.from, name: (l.fromName || 'UNKNOWN'), text: (l.payload.text || ''), ts: l.ts || Date.now() });
+            // v0.44: photo payloads auto-save to DATABANK here too (covers letters that
+            // arrived via the UNVERIFIED quarantine gate -- promoted letters never re-fire
+            // the first-sight auto-save in processInboxSnapshot)
+            if (l.payload && l.payload.photo) autoSaveMailPhoto(key);
+            mailLog.unshift({
+                dir: 'in', uid: safeUid(l.from), name: (l.fromName || 'UNKNOWN'),
+                text: (l.payload.text || (l.payload && l.payload.photo ? '📷 PHOTO TRANSMISSION' : '')),
+                ts: l.ts || Date.now(),
+                hasPhoto: !!(l.payload && l.payload.photo),
+                fulfilledTitle: (l.payload && l.payload.fulfilledTitle) || null
+            });
             if (mailLog.length > 100) mailLog.pop();
             flagLetter(key, 'claimed');
             markProcessed(key);
             saveComms();
             showNotification('TRANSMISSION LOGGED.');
             if (mailTabActive()) renderMail();
+        }
+
+        // v0.44 item-10: one copy per mail key, ever (dedupe survives queue replays)
+        function autoSaveMailPhoto(key) {
+            let saved;
+            try { saved = JSON.parse(localStorage.getItem('pipboy-photosaved') || '[]'); } catch (e) { saved = []; }
+            if (saved.indexOf(key) !== -1) return;
+            const l = inboxLetters[key] || unverifiedLetters[key];
+            if (!l || !l.payload || !l.payload.photo) return;
+            saved.push(key);
+            if (saved.length > 500) saved.splice(0, saved.length - 500);
+            localStorage.setItem('pipboy-photosaved', JSON.stringify(saved));
+            archiveEntry({ pip: l.payload.photo, raw: null }); // quota purge + confirm built in
+        }
+
+        // v0.44 item-12: giver opens a fulfil notice -> if THEY also hold an open copy of
+        // the same contract (shared/co-op quest, not merely delegated), offer to complete
+        // their copy in the same breath
+        function openFulfilNotice(key, l, src) {
+            const from = (l.fromName || 'UNKNOWN');
+            const title = String((l.payload && l.payload.fulfilledTitle) || 'UNNAMED CONTRACT').toUpperCase();
+            const myCopy = quests.find(q => q.name === title && !q.completed);
+            const buttons = [];
+            if (myCopy) {
+                buttons.push({ label: 'MARK MY COPY COMPLETE', action: () => {
+                    myCopy.completed = true;
+                    saveToStorage();
+                    renderQuests();
+                    showNotification('YOUR COPY MARKED COMPLETE: ' + title);
+                    acceptMsg(key, l);
+                }});
+            }
+            buttons.push({ label: 'NOTED', action: () => acceptMsg(key, l) });
+            showCustomPrompt(from + ' REPORTS CONTRACT FULFILLED: "' + title + '".' + (myCopy ? ' YOU HOLD AN OPEN COPY OF THIS CONTRACT.' : ''), buttons);
         }
 
         function acceptQuest(key, l) {
@@ -3595,9 +3713,95 @@
             forgetWastelander(contactUidTarget);
         }
 
+        // --- CONTRACTS TAB (v0.44 item-11): every quest you've ISSUED, live status ---
+        // Data source is the existing outbox -- zero new storage, zero Firebase changes.
+        function renderContracts() {
+            const el = document.getElementById('contracts-list');
+            if (!el) return;
+            const given = outbox.filter(e => e.type === 'quest');
+            if (!given.length) {
+                el.innerHTML = '<p style="opacity:0.5;">NO CONTRACTS ISSUED. SEND A QUEST TO START ONE.</p>';
+                return;
+            }
+            el.innerHTML = '';
+            [...given].reverse().forEach(e => {
+                const c = contactByUid(e.to);
+                const terminal = (e.status === 'accepted' || e.status === 'declined' || e.status === 'fulfilled' || e.status === 'closed');
+                const clearable = terminal || e.status === 'queued';
+                const row = document.createElement('div');
+                row.className = 'item-row';
+                row.style.cursor = 'default';
+                row.innerHTML = '<div class="item-info"><div>' + escapeHtml(e.summary) + '</div><div class="item-effects">→ ' + escapeHtml(c ? c.name : e.to) + ' — ' + escapeHtml(statusLabel(e)) + ' — ' + timeOf(e.ts) + '</div></div>' + (clearable ? '<button class="theme-btn" onclick="clearOutboxEntry(\'' + e.id + '\'); renderContracts();">[X]</button>' : '');
+                el.appendChild(row);
+            });
+        }
+
+        // --- PHOTO MAIL (v0.44 items 1/2): two-way confirmed links only ---
+        // Gate: allowed unless YOUR handshake to them is verifiably still unanswered
+        // (accepted = true; an outstanding sent/queued = blocked; offline-established
+        // legacy links pass rather than punishing offline players).
+        function isMutualLink(uid) {
+            if (!contactByUid(uid)) return false;
+            const links = outbox.filter(e => e.type === 'handshake' && e.to === uid);
+            if (links.some(e => e.status === 'accepted')) return true;
+            if (links.some(e => e.status === 'sent' || e.status === 'queued' || e.status === 'sending')) return false;
+            return true;
+        }
+
+        let photoPickTarget = null;
+        function openPhotoPicker(uid) {
+            const c = contactByUid(uid);
+            if (!c) return;
+            if (!isMutualLink(uid)) { showNotification('LINK NOT CONFIRMED BOTH WAYS YET -- THEY MUST ACCEPT YOUR DATACARD.'); return; }
+            if (!photoArchive.length) { showNotification('DATABANK EMPTY -- TAKE A PHOTO FIRST.'); return; }
+            photoPickTarget = uid;
+            document.getElementById('pp-title').innerText = 'TRANSMIT PHOTO TO: ' + c.name;
+            let html = '<div class="photo-tile-grid">';
+            photoArchive.forEach((e, i) => { html += `<div class="photo-tile" onclick="pickPhotoForMail(${i})"><img src="${entryPip(e)}"></div>`; });
+            document.getElementById('pp-grid').innerHTML = html + '</div>';
+            document.getElementById('photo-pick-modal').style.display = 'flex';
+        }
+
+        function pickPhotoForMail(idx) {
+            const entry = photoArchive[idx];
+            const c = contactByUid(photoPickTarget);
+            if (!entry || !c) return closeModals();
+            document.getElementById('photo-pick-modal').style.display = 'none';
+            showCustomPrompt('TRANSMIT THIS PHOTO TO ' + c.name + '?', [
+                { label: 'SEND PHOTO', action: () => { sendPhotoMail(c, entry); } },
+                { label: 'BACK', color: 'var(--pip-color-dim)', action: () => { document.getElementById('photo-pick-modal').style.display = 'flex'; } }
+            ]);
+        }
+
+        function sendPhotoMail(c, entry) {
+            // Compress for transit: PIP art rides the existing 'msg' letter type as a
+            // max-800px JPEG ~0.55 (60-120KB, RTDB-friendly, ZERO rules changes needed)
+            const img = new Image();
+            img.onload = function() {
+                let url = entryPip(entry);
+                try {
+                    const scale = Math.min(1, 800 / Math.max(img.width, img.height));
+                    if (scale < 1) {
+                        const cv = document.createElement('canvas');
+                        cv.width = Math.floor(img.width * scale);
+                        cv.height = Math.floor(img.height * scale);
+                        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+                        url = cv.toDataURL('image/jpeg', 0.55);
+                    }
+                } catch (e) {}
+                queueMail(c.uid, 'msg', { text: '📷 PHOTO TRANSMISSION', photo: url }, 'PHOTO');
+                mailLog.unshift({ dir: 'out', uid: c.uid, name: c.name, text: '📷 PHOTO TRANSMISSION', ts: Date.now(), hasPhoto: true });
+                if (mailLog.length > 100) mailLog.pop();
+                saveComms();
+                closeModals();
+                notifyTxResult();
+            };
+            img.onerror = function() { closeModals(); showNotification('PHOTO UNREADABLE -- TRANSMISSION ABORTED.'); };
+            img.src = entryPip(entry);
+        }
+
         // --- LINK REQUESTS panel (handshake outbox, lives under STATS — separate from mail) ---
-        function renderLinkRequests() {
-            const el = document.getElementById('linkrequests-list');
+        function renderLinkRequests() {            const el = document.getElementById('linkrequests-list');
             if (!el) return;
             const links = outbox.filter(e => e.type === 'handshake');
             if (!links.length) {
@@ -3635,7 +3839,9 @@
             closeModals();
             if (kind === 'msg') {
                 document.getElementById('cm-title').innerText = 'MESSAGE TO: ' + t.name + (t.linked ? '' : ' (UNLINKED)');
-                document.getElementById('cm-text').value = '';
+                const cm = document.getElementById('cm-text');
+                cm.value = '';
+                autoGrowEl(cm); // v0.44: reset the growing field to one line per open
                 document.getElementById('compose-msg-modal').style.display = 'flex';
             } else if (kind === 'quest') {
                 document.getElementById('cq-title').innerText = 'QUEST TO: ' + t.name;
@@ -3826,7 +4032,10 @@
                         html += '<div class="item-row" style="cursor:default;"><div class="item-info"><div>↑ ' + escapeHtml(e.summary) + ' → ' + escapeHtml(c ? c.name : e.to) + '</div><div class="item-effects">' + escapeHtml(statusLabel(e)) + ' — ' + timeOf(e.ts) + '</div></div>' + (clearable ? '<button class="theme-btn" onclick="clearOutboxEntry(\'' + e.id + '\')">[X]</button>' : '') + '</div>';
                     } else {
                         const m = h.m;
-                        html += '<div style="border-bottom:1px dashed var(--pip-color-dim); padding:6px 0; font-size:1rem;"><span style="opacity:0.7;">' + (m.dir === 'in' ? '↓ FROM ' : '↑ TO ') + escapeHtml(m.name) + ' — ' + timeOf(m.ts) + ':</span> ' + escapeHtml(m.text) + '</div>';
+                        // v0.44: ⚑ flag on fulfil notices, 📷 on photo transmissions,
+                        // and every incoming row carries a one-tap REPLY
+                        const tag = m.fulfilledTitle ? ' ⚑' : (m.hasPhoto ? ' 📷' : '');
+                        html += '<div style="border-bottom:1px dashed var(--pip-color-dim); padding:6px 0; font-size:1rem; display:flex; justify-content:space-between; gap:8px; align-items:center;"><span><span style="opacity:0.7;">' + (m.dir === 'in' ? '↓ FROM ' : '↑ TO ') + escapeHtml(m.name) + ' — ' + timeOf(m.ts) + ':</span> ' + escapeHtml(m.text || '') + tag + '</span>' + (m.dir === 'in' && m.uid ? '<button class="theme-btn" style="flex-shrink:0;" onclick="composeTo(\'msg\', \'' + m.uid + '\')">[REPLY]</button>' : '') + '</div>';
                     }
                 });
             }
