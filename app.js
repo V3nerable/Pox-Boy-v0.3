@@ -1293,15 +1293,29 @@
         }
 
         function showNotification(msg) {
-            // In-app modal (always works)
+            // In-app modal (always works). v0.48 DECOUPLING: showNotification is now
+            // STRICTLY in-app — before this, every UI toast ("OVERSEER MODE ENABLED",
+            // "TRANSMISSION SENT"...) was ALSO an OS push + vibration, nonstop spam.
+            // OS pushes now flow ONLY via mailPingOs() (transmission categories + master).
             document.getElementById('notification-text').innerText = msg;
             document.getElementById('notification-modal').style.display = 'flex';
 
-            pushNativeNotification(msg);
-
-            // Haptic vibration
-            if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+            // Haptic vibration (v0.48: OPTIONS-gated — the buzz was part of the pain)
+            if (navigator.vibrate && localStorage.getItem('pipboy-vibrate') !== '0') navigator.vibrate([200, 100, 200]);
         }
+
+        // v0.48: haptics master switch (default ON)
+        function cycleVibrate() {
+            const on = localStorage.getItem('pipboy-vibrate') === '0';
+            localStorage.setItem('pipboy-vibrate', on ? '1' : '0');
+            const b = document.getElementById('options-vibrate-btn');
+            if (b) b.innerText = '[VIBRATE: ' + (on ? 'ON' : 'OFF') + ']';
+            showNotification('VIBRATE ' + (on ? 'ON.' : 'OFF.'));
+        }
+        (function() {
+            const b = document.getElementById('options-vibrate-btn');
+            if (b && localStorage.getItem('pipboy-vibrate') === '0') b.innerText = '[VIBRATE: OFF]';
+        })();
 
         // Android Chrome THROWS on `new Notification()` from a page (illegal constructor) --
         // native notifications must go through the ServiceWorker registration there.
@@ -1604,11 +1618,17 @@
                 localStorage.setItem('pipboy-dev-mode', 'true');
                 showNotification("OVERSEER MODE ENABLED. ADMIN UI UNLOCKED.");
                 closeModals();
-                
+
                 // We need to re-evaluate the current tab to reveal the buttons immediately
                 const activeMainTab = document.querySelector('.nav-tabs .nav-item.active').innerText.toLowerCase();
                 switchMainTab(activeMainTab);
-                
+
+            } else if (pendingAuthAction === 'TOGGLE_DEV_OFF') {
+                // v0.48: PIN-verified lockout (moved out of toggleDevMode's one-tap path)
+                doDevDisable();
+                showNotification("OVERSEER MODE DISABLED. UI RESTRICTED.");
+                closeModals();
+
             } else if (pendingAuthAction === 'REP') {
                 let amount = parseInt(document.getElementById('rep-amount').value, 10);
                 if (isNaN(amount) || amount <= 0) {
@@ -2220,6 +2240,8 @@
         // and pins older than 72h are skipped (outlive the weekend, die before the next).
         let sharedPinsGroup = null;
         let lastKnownSharedPins = {};
+        let radZonesGroup = null;          // v0.47: Overseer hot zones (static fields)
+        let lastKnownRadZones = {};
         let userMarker = null;
         let gpsWatchId = null;
         let liveTrackingEnabled = false;
@@ -2256,6 +2278,7 @@
             markersGroup = L.layerGroup().addTo(pipMap);
             otherPlayersGroup = L.layerGroup().addTo(pipMap);
             sharedPinsGroup = L.layerGroup().addTo(pipMap); // v0.38 broadcast marker board
+            radZonesGroup = L.layerGroup().addTo(pipMap);   // v0.47 Overseer hot zones
             renderMarkers();
             
             // Start listening to Firebase for other players
@@ -2341,6 +2364,31 @@
                         className: 'pip-tooltip'
                     })
                     .addTo(sharedPinsGroup);
+            });
+        }
+
+        // v0.47: draw every Overseer HOT ZONE — red dashed diamond, permanent until
+        // EXTINGUISHED (no staleness prune: the Overseer owns the board)
+        function renderRadZones(data) {
+            lastKnownRadZones = data || {};
+            if (!radZonesGroup) return;
+            radZonesGroup.clearLayers();
+            const hotIcon = L.divIcon({
+                className: 'custom-pip-marker',
+                html: '<div style="width: 14px; height: 14px; transform: rotate(45deg); border: 2px dashed #ff3333; background: transparent; box-shadow: 0 0 12px #ff3333;"></div>',
+                iconSize: [14, 14],
+                iconAnchor: [7, 7]
+            });
+            Object.keys(lastKnownRadZones).forEach(zk => {
+                const z = lastKnownRadZones[zk];
+                if (!z || typeof z.lat !== 'number' || typeof z.lng !== 'number') return;
+                L.marker([z.lat, z.lng], {icon: hotIcon, zIndexOffset: 450})
+                    .bindTooltip('☢ ' + String(z.label || 'HOT ZONE').toUpperCase(), {
+                        permanent: true,
+                        direction: 'bottom',
+                        className: 'pip-tooltip'
+                    })
+                    .addTo(radZonesGroup);
             });
         }
 
@@ -2505,7 +2553,7 @@
                     const lat = position.coords.latitude;
                     const lng = position.coords.longitude;
                     myLastLat = lat; myLastLng = lng; // feeds map wastelander-card distance readout
-                    evalPariahField(); // v0.46: snappy field entry/exit on every fresh fix (radTick backstops this minutely)
+                    evalPariahField(); // v0.46: snappy field entry/exit on every fresh fix (the 5s/60s ticks backstop this)
                     
                     btn.innerText = "[DISABLE GPS TRACKING]";
                     btn.style.background = "var(--pip-color-dim)";
@@ -2597,25 +2645,16 @@
 
         function toggleDevMode() {
             let isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
-            
             if (isDev) {
-                // If it's already on, turn it off immediately without a password
-                localStorage.setItem('pipboy-dev-mode', 'false');
-                showNotification("OVERSEER MODE DISABLED. UI RESTRICTED.");
-                
-                // Manually hide elements that should disappear immediately
-                document.getElementById('add-item-btn').style.display = 'none';
-                document.getElementById('add-quest-btn').style.display = 'none';
-                document.getElementById('faction-controls').style.display = 'none';
-                document.getElementById('dev-add-marker-btn').style.display = 'none';
-                document.getElementById('dev-remove-marker-btn').style.display = 'none';
-                // v0.46: PARIAH WATCH dies with Overseer mode
-                const opEl = document.getElementById('overseer-pariahs');
-                if (opEl) { opEl.style.display = 'none'; opEl.innerHTML = ''; }
-
-                // If we are currently in the action modal, hide the dev buttons there too
-                document.getElementById('dev-add-one-btn').style.display = 'none';
-                document.getElementById('dev-remove-one-btn').style.display = 'none';
+                // v0.48: disabling now needs the PIN — the MAP-tab TOGGLE OVERSEER button is
+                // one tap from a fat-finger, and a silent lockout "loses" the whole admin
+                // surface (user field report: "lost overseer pariah stuff, not sure how")
+                pendingAuthAction = 'TOGGLE_DEV_OFF';
+                document.getElementById('auth-code').value = '';
+                document.getElementById('auth-amount-group').style.display = 'none';
+                document.getElementById('auth-title').innerText = "OVERSEER AUTHORIZATION";
+                document.getElementById('auth-desc').innerText = "Enter security code to RESTRICT Admin / Overseer tools.";
+                document.getElementById('auth-modal').style.display = 'flex';
             } else {
                 // To turn it ON, they must provide the PIN
                 pendingAuthAction = 'TOGGLE_DEV';
@@ -2625,6 +2664,21 @@
                 document.getElementById('auth-desc').innerText = "Enter security code to unlock Admin / Overseer tools.";
                 document.getElementById('auth-modal').style.display = 'flex';
             }
+        }
+
+        // v0.48: the actual lockout — lives behind the PIN via confirmAuth('TOGGLE_DEV_OFF')
+        function doDevDisable() {
+            localStorage.setItem('pipboy-dev-mode', 'false');
+            // Manually hide elements that should disappear immediately (null-guarded: some
+            // of these ids only exist on certain layouts — never let one 404 kill the rest)
+            ['add-item-btn', 'add-quest-btn', 'faction-controls', 'dev-add-marker-btn',
+             'dev-remove-marker-btn', 'dev-add-one-btn', 'dev-remove-one-btn'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+            // v0.46: PARIAH WATCH dies with Overseer mode
+            const opEl = document.getElementById('overseer-pariahs');
+            if (opEl) { opEl.style.display = 'none'; opEl.innerHTML = ''; }
         }
 
         function triggerDevReset() {
@@ -3267,6 +3321,9 @@
             return document.getElementById('tab-data').classList.contains('active') && currentDataTab === 'mail';
         }
         function safeUid(uid) { return String(uid || '').replace(/[^A-Za-z0-9_\-]/g, ''); }
+        // v0.48: hoisted GLOBAL (was a closure inside renderMail — a ReferenceError in
+        // renderContracts/renderPariahPanel silently blanked those tabs the moment a row existed)
+        function timeOf(ts) { return new Date(ts || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}); }
 
         // --- MY DATACARD: broadcast identity QR (plain-text, not JSON) ---
         function openDatacard() {
@@ -3450,9 +3507,12 @@
                             }
                         } else if (v.declined) {
                             e.status = 'declined';
-                            // MOVE policy: a declined shipment returns the goods to the sender
-                            if (e.type === 'item' && !e.refunded) {
-                                refundItemPayload(e.payload);
+                            // MOVE policy: a declined shipment returns the goods to the sender —
+                            // v0.47 extended to message letters carrying an attached ITEM pod
+                            const refundPod = (e.type === 'item') ? e.payload
+                                : (e.type === 'msg' && e.payload && e.payload.item) ? e.payload.item : null;
+                            if (refundPod && !e.refunded) {
+                                refundItemPayload(refundPod);
                                 e.refunded = true;
                                 if (notifyPref('contract')) showNotification('TRANSMISSION DECLINED — ITEM RETURNED TO INVENTORY.');
                             }
@@ -3502,43 +3562,91 @@
         }
 
         function evalPariahField() {
-            // The condemned do not fear their own shadow: a declared pariah is self-immune
-            if (myMailUid && pariahMarks[myMailUid]) {
-                radFieldActive = false;
-                radFieldPariah = null;
-                return;
-            }
+            // The condemned do not fear their own shadow: a declared pariah is self-immune…
+            const selfMarked = !!(myMailUid && pariahMarks[myMailUid]);
             let nearest = null;
             if (myLastLat !== null && myLastLng !== null) {
-                Object.keys(pariahMarks).forEach(uid => {
-                    const b = lastKnownBeaconData[uid];
-                    // Stale signals do not irradiate: beacons older than 5 minutes are ignored
-                    if (!b || !b.timestamp || (Date.now() - b.timestamp) > 5 * 60 * 1000) return;
-                    if (typeof b.lat !== 'number' || typeof b.lng !== 'number') return;
-                    const d = getDistance(myLastLat, myLastLng, b.lat, b.lng);
+                // …to PERSON fields. Stale signals do not irradiate: beacons older than
+                // 5 minutes are ignored.
+                if (!selfMarked) {
+                    Object.keys(pariahMarks).forEach(uid => {
+                        const b = lastKnownBeaconData[uid];
+                        if (!b || !b.timestamp || (Date.now() - b.timestamp) > 5 * 60 * 1000) return;
+                        if (typeof b.lat !== 'number' || typeof b.lng !== 'number') return;
+                        const d = getDistance(myLastLat, myLastLng, b.lat, b.lng);
+                        if (!nearest || d < nearest.d) {
+                            nearest = { d: d, name: ((pariahMarks[uid] || {}).name || b.name || 'PARIAH'), kind: 'PARIAH' };
+                        }
+                    });
+                }
+                // v0.47: static HOT ZONES irradiate everyone who steps in — pariah or not
+                Object.keys(lastKnownRadZones).forEach(zk => {
+                    const z = lastKnownRadZones[zk];
+                    if (!z || typeof z.lat !== 'number' || typeof z.lng !== 'number') return;
+                    const d = getDistance(myLastLat, myLastLng, z.lat, z.lng);
                     if (!nearest || d < nearest.d) {
-                        nearest = { d: d, name: ((pariahMarks[uid] || {}).name || b.name || 'PARIAH') };
+                        nearest = { d: d, name: ('☢ ' + (z.label || 'HOT ZONE')), kind: 'HOT ZONE' };
                     }
                 });
             }
-            // Hysteresis: the field GRABS at 15m and RELEASES at 18m — no boundary flicker
+            // Hysteresis: the field GRABS at 15m and RELEASES at 18m — no boundary flicker.
+            // v0.48: entry/exit toasts DELETED per user — the geiger counter is the voice
+            // of the field now; state flips silently.
             if (!radFieldActive && nearest && nearest.d <= 15) {
                 radFieldActive = true;
                 radFieldPariah = nearest.name;
-                showNotification('⚠ RADIATION FIELD — PARIAH NEARBY');
             } else if (radFieldActive && (!nearest || nearest.d > 18)) {
                 radFieldActive = false;
                 radFieldPariah = null;
-                showNotification('RADIATION FIELD CLEAR.');
             }
         }
 
-        function radTick() {
-            evalPariahField(); // cheap re-evaluation: beacons age even between GPS fixes
-            if (radFieldActive) adjustRads(1);
-            else adjustRads(-1); // v0.46: passive recovery — the body sheds 1 rad per quiet minute
+        // v0.48: GEIGER COUNTER — synthesized clicks for the rad engine (WebAudio,
+        // zero shipped assets, offline-first). Short filtered noise burst per click.
+        let geigerCtx = null;
+        function geigerClick() {
+            try {
+                if (!geigerCtx) geigerCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (geigerCtx.state === 'suspended') geigerCtx.resume();
+                const len = Math.floor(geigerCtx.sampleRate * 0.018); // ~18ms crack
+                const buf = geigerCtx.createBuffer(1, len, geigerCtx.sampleRate);
+                const data = buf.getChannelData(0);
+                for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+                const src = geigerCtx.createBufferSource();
+                src.buffer = buf;
+                const hp = geigerCtx.createBiquadFilter();
+                hp.type = 'highpass';
+                hp.frequency.value = 3800;
+                const g = geigerCtx.createGain();
+                g.gain.value = 0.22;
+                src.connect(hp); hp.connect(g); g.connect(geigerCtx.destination);
+                src.start();
+            } catch (e) { /* audio unavailable: silence, never an error */ }
         }
-        setInterval(radTick, 60000);
+        // A field tick rattles 1–3 clicks like real counter pile-up
+        function geigerBurst() {
+            const n = 1 + Math.floor(Math.random() * 3);
+            for (let i = 0; i < n; i++) setTimeout(geigerClick, i * (50 + Math.random() * 90));
+        }
+        // Autoplay policy: first gesture of the session unlocks/resumes the context
+        document.addEventListener('pointerdown', () => {
+            if (geigerCtx && geigerCtx.state === 'suspended') geigerCtx.resume();
+        }, { passive: true });
+
+        // v0.48: two clocks. Fields burn FAST (user: "1 every 5 seconds"), recovery stays
+        // one rad per quiet minute — and the two still never run at once.
+        function radDamageTick() {
+            evalPariahField(); // cheap re-evaluation: beacons age even between GPS fixes
+            if (!radFieldActive) return;
+            adjustRads(1);
+            geigerBurst(); // the counter is the only voice of the field now
+        }
+        setInterval(radDamageTick, 5000);
+        function radDecayTick() {
+            evalPariahField();
+            if (!radFieldActive) adjustRads(-1); // v0.46: passive recovery, floor 0
+        }
+        setInterval(radDecayTick, 60000);
 
         // v0.46: the Overseer's pariah decrees (same watch pattern as the mailbox)
         function startPariahListener() {
@@ -3547,6 +3655,15 @@
                 evalPariahField(); // a fresh decree can bathe you where you stand
                 if (currentDataTab === 'stats') renderStatsTab();
             }, () => {}); // offline: last known decree list stands
+        }
+
+        // v0.47: Overseer hot zones (static fields) — they watch the same way
+        function startRadZoneListener() {
+            window.firebaseOnValue(window.firebaseRef(window.db, 'radzones/'), (snap) => {
+                renderRadZones(snap.val() || {});
+                evalPariahField(); // a dropped zone can bathe you where you stand
+                if (currentDataTab === 'stats') renderStatsTab();
+            }, () => {}); // offline: last known zone board stands
         }
 
         // --- OVERSEER PARIAH CONTROL (STATS tab, dev-mode only) ---
@@ -3572,19 +3689,74 @@
             });
             html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:15px 0 10px; opacity:0.8;">LIVE SIGNALS (5MIN)</h3>';
             if (!cands.length) {
-                html += '<p style="opacity:0.5;">NO FRESH SIGNALS ON THE RADAR.</p>';
+                html += '<p style="opacity:0.5;">NO FRESH SIGNALS ON THE RADAR. OPEN THE MAP ONCE THIS SESSION TO START THE RADAR FEED.</p>';
             } else {
                 cands.forEach(uid => {
                     const b = lastKnownBeaconData[uid];
                     html += '<div class="item-row"><div class="item-info"><div>' + escapeHtml(b.name || 'UNKNOWN') + '</div></div><button class="theme-btn" style="color:#ff3333; border-color:#ff3333;" onclick="markPariah(\'' + escapeHtml(uid) + '\')">[MARK PARIAH]</button></div>';
                 });
             }
+            // v0.47: pre-declare from the rolodex — a decree sits until their beacon next
+            // goes fresh (fields only irradiate off live ≤5min signals, so COLD marks
+            // are harmless paperwork until the wastelander actually walks in)
+            const known = rolodex.filter(c => c.uid && c.uid !== myMailUid && !pariahMarks[c.uid]);
+            html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:15px 0 10px; opacity:0.8;">KNOWN WASTELANDERS (ROLODEX)</h3>';
+            if (!known.length) {
+                html += '<p style="opacity:0.5;">NO ELIGIBLE CONTACTS.</p>';
+            } else {
+                known.forEach(c => {
+                    const b = lastKnownBeaconData[c.uid];
+                    const cold = !(b && b.timestamp && (now - b.timestamp) <= 5 * 60 * 1000);
+                    html += '<div class="item-row"><div class="item-info"><div>' + escapeHtml(c.name || 'UNKNOWN') + (cold ? ' <span style="opacity:0.6;">(COLD)</span>' : '') + '</div></div><button class="theme-btn" style="color:#ff3333; border-color:#ff3333;" onclick="markPariah(\'' + escapeHtml(c.uid) + '\')">[MARK PARIAH]</button></div>';
+                });
+            }
+            // v0.47: HOT ZONES — static radiation fields the Overseer drops at a spot.
+            // No auto-expiry: they burn until EXTINGUISH (decree-style control).
+            html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:15px 0 10px; opacity:0.8;">HOT ZONES (STATIC)</h3>';
+            const zKeys = Object.keys(lastKnownRadZones).sort((a, b) => ((lastKnownRadZones[b] || {}).ts || 0) - ((lastKnownRadZones[a] || {}).ts || 0));
+            if (!zKeys.length) {
+                html += '<p style="opacity:0.5;">NO HOT ZONES DEPLOYED.</p>';
+            } else {
+                zKeys.forEach(zk => {
+                    const z = lastKnownRadZones[zk] || {};
+                    html += '<div class="item-row"><div class="item-info"><div style="color:#ff3333;">☢ ' + escapeHtml(z.label || 'HOT ZONE') + '</div><div class="item-effects">DEPLOYED ' + timeOf(z.ts || Date.now()) + '</div></div><button class="theme-btn" onclick="extinguishZone(\'' + escapeHtml(zk) + '\')">[EXTINGUISH]</button></div>';
+                });
+            }
+            html += '<button class="pip-btn" style="border-color:#ff3333; color:#ff3333; margin-top:10px;" onclick="dropHotZone()">[☢ DROP HOT ZONE AT MY POSITION]</button>';
             return html;
+        }
+
+        // v0.47: static-field counterparts to markPariah/cleansePariah
+        function dropHotZone() {
+            if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- HOT ZONE NOT TRANSMITTED.'); return; }
+            if (myLastLat === null || myLastLng === null) { showNotification('NO POSITION FIX -- ENABLE GPS TRACKING FROM THE MAP TAB.'); return; }
+            showCustomPrompt('IRRADIATE THIS SPOT? A ☢ HOT ZONE (15M FIELD) DROPS AT YOUR POSITION FOR ALL UNITS AND BURNS UNTIL EXTINGUISHED.', [
+                { label: 'DROP HOT ZONE', color: '#ff3333', action: () => {
+                    const key = 'z' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
+                    window.firebaseSet(window.firebaseRef(window.db, 'radzones/' + key), { label: 'HOT ZONE', lat: myLastLat, lng: myLastLng, ts: Date.now() })
+                        .then(() => showNotification('HOT ZONE DEPLOYED.'))
+                        .catch(() => showNotification('DEPLOY FAILED -- CHECK SIGNAL OR RULES.'));
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)' }
+            ]);
+        }
+
+        function extinguishZone(key) {
+            if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- ORDER NOT TRANSMITTED.'); return; }
+            showCustomPrompt('EXTINGUISH THIS HOT ZONE? ITS FIELD DIES IMMEDIATELY FOR ALL UNITS.', [
+                { label: 'EXTINGUISH', action: () => {
+                    window.firebaseRemove(window.firebaseRef(window.db, 'radzones/' + key))
+                        .then(() => showNotification('HOT ZONE EXTINGUISHED.'))
+                        .catch(() => showNotification('ORDER FAILED -- CHECK SIGNAL.'));
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)' }
+            ]);
         }
 
         function markPariah(uid) {
             if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- DECREE NOT TRANSMITTED.'); return; }
-            const name = String(((lastKnownBeaconData[uid] || {}).name) || 'UNKNOWN').toUpperCase().substring(0, 32);
+            // v0.47: rolodex pre-declares arrive with no live beacon — fall back to the contact name
+            const name = String(((lastKnownBeaconData[uid] || {}).name) || ((contactByUid(uid) || {}).name) || 'UNKNOWN').toUpperCase().substring(0, 32);
             showCustomPrompt('DECLARE ' + name + ' A PARIAH? EVERY UNIT WITHIN 15M TAKES RADS UNTIL CLEANSED.', [
                 { label: 'MARK PARIAH', color: '#ff3333', action: () => {
                     window.firebaseSet(window.firebaseRef(window.db, 'pariahs/' + uid), { name: name, ts: Date.now() })
@@ -3656,8 +3828,8 @@
                             showNotification('INCOMING TRANSMISSION — ' + (l.fromName || 'UNKNOWN') + ': ' + typeSummary(l));
                             mailPingOs('NEW TRANSMISSION FROM ' + (l.fromName || 'UNKNOWN') + ' -- ' + typeSummary(l));
                         }
-                        // v0.44: linked-sender photos land straight in the DATABANK at first sight
-                        if (l.type === 'msg' && l.payload && l.payload.photo) autoSaveMailPhoto(key);
+                        // v0.48: inbound photos no longer raid the CAM databank — they open
+                        // right here in mail (prompt + feed thumbs); the mailbox is their home.
                     }
                 } else {
                     stillUnverified[key] = l;
@@ -3692,11 +3864,16 @@
             saveProcessed();
             delete inboxLetters[key];
             delete unverifiedLetters[key]; // also consume letters opened via the untrusted gate
+            renderMailBadge(); // v0.48: badge repaints the INSTANT a letter resolves — before this it waited (visibly) on the next Firebase snapshot
         }
 
         function typeSummary(l) {
             if (l.type === 'quest') return 'QUEST: ' + (l.payload && l.payload.title ? l.payload.title : '');
             if (l.type === 'item') return 'ITEM: ' + (l.payload && l.payload.name ? l.payload.name : '') + ' x' + (l.payload && l.payload.quantity ? l.payload.quantity : 1);
+            // v0.47: message letters can carry attachments — say so on the ACTION row
+            if (l.type === 'msg' && l.payload && (l.payload.photo || l.payload.item)) {
+                return 'MESSAGE:' + (l.payload.photo ? ' 📷' : '') + (l.payload.item ? ' 🎒 ' + l.payload.item.name : '');
+            }
             return 'MESSAGE';
         }
 
@@ -3751,20 +3928,32 @@
             if (l.type === 'msg') {
                 // v0.44: fulfil notices get their own flow (option to complete YOUR copy too)
                 if (l.payload && l.payload.fulfilledTitle) { openFulfilNotice(key, l, src); return; }
-                // v0.44: photo transmissions land in the DATABANK when logged
-                if (l.payload && l.payload.photo) {
-                    showCustomPrompt(from + ' SENT A PHOTO TRANSMISSION. IT LANDS IN YOUR DATABANK.', [
+                // v0.47: ONE combined branch — plain text, text+photo, text+item, or all.
+                // Attached photos show right in the prompt; attached items grant on LOG.
+                const p = l.payload || {};
+                if (!p.photo && !p.item) {
+                    showCustomPrompt('MESSAGE FROM ' + from + ': "' + (p.text || '') + '"', [
                         { label: 'LOG TRANSMISSION', action: () => acceptMsg(key, l) },
                         { label: 'REPLY', action: () => composeTo('msg', safeUid(l.from)) },
                         { label: 'DELETE', color: '#ff3333', action: () => declineLetter(key) }
                     ]);
                     return;
                 }
-                showCustomPrompt('MESSAGE FROM ' + from + ': "' + (l.payload.text || '') + '"', [
-                    { label: 'LOG TRANSMISSION', action: () => acceptMsg(key, l) },
+                const bits = [];
+                if (p.photo) bits.push('PHOTO ATTACHED — VIEW IT HERE; IT STAYS IN THIS MAIL THREAD'); // v0.48: mail-native photos, no databank raid
+                if (p.item) bits.push('ITEM ATTACHED: ' + p.item.name + ' x' + (p.item.quantity || 1) + ' — TAKE IT TO CLAIM');
+                const body = (p.text && p.text !== '📷 PHOTO TRANSMISSION')
+                    ? 'MESSAGE FROM ' + from + ': "' + p.text + '"'
+                    : from + ' SENT A PHOTO TRANSMISSION.';
+                showCustomPrompt(body + '\n\n' + bits.join('\n'), [
+                    { label: p.item ? 'LOG + TAKE ITEM' : 'LOG TRANSMISSION', action: () => acceptMsg(key, l) },
                     { label: 'REPLY', action: () => composeTo('msg', safeUid(l.from)) },
                     { label: 'DELETE', color: '#ff3333', action: () => declineLetter(key) }
                 ]);
+                if (p.photo) {
+                    const img = document.getElementById('cp-img');
+                    if (img) { img.src = p.photo; img.style.display = 'block'; } // full transit copy, pre-log
+                }
             } else if (l.type === 'quest') {
                 const p = l.payload || {};
                 showCustomPrompt('QUEST FROM ' + from + ': "' + (p.title || '') + '"' + (p.brief ? ' — ' + p.brief : '') + ' — OBJ: ' + ((p.objectives || []).join(' / ') || 'NONE') + (p.reward ? ' — REWARD: ' + p.reward : ''), [
@@ -3808,10 +3997,12 @@
         }
 
         function acceptMsg(key, l) {
-            // v0.44: photo payloads auto-save to DATABANK here too (covers letters that
-            // arrived via the UNVERIFIED quarantine gate -- promoted letters never re-fire
-            // the first-sight auto-save in processInboxSnapshot)
-            if (l.payload && l.payload.photo) autoSaveMailPhoto(key);
+            // v0.48: photos live IN MAIL now — no databank auto-save on log either
+            // v0.47: attached item pods grant straight into the LOADOUT on log
+            if (l.payload && l.payload.item) {
+                refundItemPayload(l.payload.item);
+                showNotification('ITEM SECURED: ' + (l.payload.item.name || 'UNKNOWN'));
+            }
             const logEntry = {
                 dir: 'in', uid: safeUid(l.from), name: (l.fromName || 'UNKNOWN'),
                 text: (l.payload.text || (l.payload && l.payload.photo ? '📷 PHOTO TRANSMISSION' : '')),
@@ -3836,18 +4027,9 @@
             if (mailTabActive()) renderMail();
         }
 
-        // v0.44 item-10: one copy per mail key, ever (dedupe survives queue replays)
-        function autoSaveMailPhoto(key) {
-            let saved;
-            try { saved = JSON.parse(localStorage.getItem('pipboy-photosaved') || '[]'); } catch (e) { saved = []; }
-            if (saved.indexOf(key) !== -1) return;
-            const l = inboxLetters[key] || unverifiedLetters[key];
-            if (!l || !l.payload || !l.payload.photo) return;
-            saved.push(key);
-            if (saved.length > 500) saved.splice(0, saved.length - 500);
-            localStorage.setItem('pipboy-photosaved', JSON.stringify(saved));
-            archiveEntry({ pip: l.payload.photo, raw: null }); // quota purge + confirm built in
-        }
+        // v0.48: photo auto-save to the CAM databank is GONE (user: "open received image in
+        // mail — don't auto save to databank"). autoSaveMailPhoto deleted; the stale
+        // pipboy-photosaved key is left in storage harmlessly.
 
         // v0.44 item-12: giver opens a fulfil notice -> if THEY also hold an open copy of
         // the same contract (shared/co-op quest, not merely delegated), offer to complete
@@ -4022,11 +4204,13 @@
         }
 
         let photoPickTarget = null;
+        let photoPickMode = 'send'; // v0.47: 'send' = one-shot photo letter; 'attach' = hand the shot back to the message composer
         function openPhotoPicker(uid) {
             const c = contactByUid(uid);
             if (!c) return;
             if (!isMutualLink(uid)) { showNotification('LINK NOT CONFIRMED BOTH WAYS YET -- THEY MUST ACCEPT YOUR DATACARD.'); return; }
             if (!photoArchive.length) { showNotification('DATABANK EMPTY -- TAKE A PHOTO FIRST.'); return; }
+            photoPickMode = 'send';
             photoPickTarget = uid;
             document.getElementById('pp-title').innerText = 'TRANSMIT PHOTO TO: ' + c.name;
             let html = '<div class="photo-tile-grid">';
@@ -4035,11 +4219,29 @@
             document.getElementById('photo-pick-modal').style.display = 'flex';
         }
 
+        function closePhotoPick() {
+            document.getElementById('photo-pick-modal').style.display = 'none';
+            if (photoPickMode === 'attach') {
+                // back to the draft — attachments and text survive the picker detour
+                document.getElementById('compose-msg-modal').style.display = 'flex';
+            }
+            photoPickMode = 'send';
+        }
+
         function pickPhotoForMail(idx) {
             const entry = photoArchive[idx];
-            const c = contactByUid(photoPickTarget);
-            if (!entry || !c) return closeModals();
+            if (!entry) return closeModals();
             document.getElementById('photo-pick-modal').style.display = 'none';
+            // v0.47 attach-mode: no immediate transmit — the composer's SEND commits the whole letter
+            if (photoPickMode === 'attach') {
+                photoPickMode = 'send';
+                cmAttach.photo = entry;
+                refreshAttachUi();
+                document.getElementById('compose-msg-modal').style.display = 'flex';
+                return;
+            }
+            const c = contactByUid(photoPickTarget);
+            if (!c) return closeModals();
             showCustomPrompt('TRANSMIT THIS PHOTO TO ' + c.name + '?', [
                 { label: 'SEND PHOTO', action: () => { sendPhotoMail(c, entry); } },
                 { label: 'BACK', color: 'var(--pip-color-dim)', action: () => { document.getElementById('photo-pick-modal').style.display = 'flex'; } }
@@ -4047,21 +4249,10 @@
         }
 
         function sendPhotoMail(c, entry) {
-            // Compress for transit: PIP art rides the existing 'msg' letter type as a
-            // max-800px JPEG ~0.55 (60-120KB, RTDB-friendly, ZERO rules changes needed)
-            const img = new Image();
-            img.onload = function() {
-                let url = entryPip(entry);
-                try {
-                    const scale = Math.min(1, 800 / Math.max(img.width, img.height));
-                    if (scale < 1) {
-                        const cv = document.createElement('canvas');
-                        cv.width = Math.floor(img.width * scale);
-                        cv.height = Math.floor(img.height * scale);
-                        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-                        url = cv.toDataURL('image/jpeg', 0.55);
-                    }
-                } catch (e) {}
+            // v0.47: transit compression extracted to compressMailPhoto() (shared with
+            // composer attachments) — letter still rides the 'msg' type, ZERO rules changes
+            compressMailPhoto(entry, url => {
+                if (!url) { closeModals(); showNotification('PHOTO UNREADABLE -- TRANSMISSION ABORTED.'); return; }
                 queueMail(c.uid, 'msg', { text: '📷 PHOTO TRANSMISSION', photo: url }, 'PHOTO');
                 // v0.45: SENT photos keep a thumb on the log entry — viewable from the feed
                 const logEntry = { dir: 'out', uid: c.uid, name: c.name, text: '📷 PHOTO TRANSMISSION', ts: Date.now(), hasPhoto: true };
@@ -4077,9 +4268,7 @@
                 saveComms();
                 closeModals();
                 notifyTxResult();
-            };
-            img.onerror = function() { closeModals(); showNotification('PHOTO UNREADABLE -- TRANSMISSION ABORTED.'); };
-            img.src = entryPip(entry);
+            });
         }
 
         // --- LINK REQUESTS panel (handshake outbox, lives under STATS — separate from mail) ---
@@ -4124,6 +4313,9 @@
                 const cm = document.getElementById('cm-text');
                 cm.value = '';
                 autoGrowEl(cm); // v0.44: reset the growing field to one line per open
+                // v0.47: fresh letter, empty attachment slots
+                cmAttach = { photo: null, itemId: null };
+                refreshAttachUi();
                 document.getElementById('compose-msg-modal').style.display = 'flex';
             } else if (kind === 'quest') {
                 document.getElementById('cq-title').innerText = 'QUEST TO: ' + t.name;
@@ -4134,17 +4326,128 @@
             }
         }
 
+        // ================= MESSAGE ATTACHMENTS (v0.47) =================
+        // A message letter can carry a DATABANK photo and/or ONE loadout item.
+        // Photo rides payload.photo (same transit compression as SEND PHOTO); the item is
+        // escrowed out of your inventory at transmit and auto-refunded on DECLINE (MOVE).
+        let cmAttach = { photo: null, itemId: null };
+
+        function refreshAttachUi() {
+            const photoBtn = document.getElementById('cm-photo-btn');
+            const itemBtn = document.getElementById('cm-item-btn');
+            const note = document.getElementById('cm-attach-note');
+            const it = cmAttach.itemId !== null ? items.find(x => x.id === cmAttach.itemId) : null;
+            if (cmAttach.itemId !== null && !it) cmAttach.itemId = null; // stock vanished
+            if (photoBtn) photoBtn.innerText = cmAttach.photo ? '[📷 PHOTO ✕]' : '[+ PHOTO]';
+            if (itemBtn) itemBtn.innerText = it ? '[🎒 ' + String(it.name).substring(0, 12) + ' ✕]' : '[+ ITEM]';
+            const bits = [];
+            if (cmAttach.photo) bits.push('PHOTO FROM DATABANK');
+            if (it) bits.push('1x ' + it.name + ' — LEAVES YOUR INVENTORY ON SEND');
+            if (note) {
+                note.style.display = bits.length ? 'block' : 'none';
+                note.innerText = bits.length ? ('☷ ATTACHED: ' + bits.join(' + ') + '. TAP A BUTTON AGAIN TO CLEAR.') : '';
+            }
+        }
+
+        function attachComposerPhoto() {
+            if (cmAttach.photo) { cmAttach.photo = null; refreshAttachUi(); return; }
+            const t = composeTargetInfo(contactUidTarget);
+            if (!t) return;
+            if (!isMutualLink(t.uid)) { showNotification('PHOTOS NEED A CONFIRMED LINK BOTH WAYS -- TEXT STILL WORKS.'); return; }
+            if (!photoArchive.length) { showNotification('DATABANK EMPTY -- TAKE A PHOTO FIRST.'); return; }
+            photoPickMode = 'attach'; // the databank picker hands the shot back to the composer
+            photoPickTarget = t.uid;
+            document.getElementById('pp-title').innerText = 'ATTACH PHOTO TO: ' + t.name;
+            let html = '<div class="photo-tile-grid">';
+            photoArchive.forEach((e, i) => { html += `<div class="photo-tile" onclick="pickPhotoForMail(${i})"><img src="${entryPip(e)}"></div>`; });
+            document.getElementById('pp-grid').innerHTML = html + '</div>';
+            document.getElementById('compose-msg-modal').style.display = 'none';
+            document.getElementById('photo-pick-modal').style.display = 'flex';
+        }
+
+        function attachComposerItem() {
+            if (cmAttach.itemId !== null) { cmAttach.itemId = null; refreshAttachUi(); return; }
+            const avail = items.filter(it => it.quantity > 0);
+            if (!avail.length) { showNotification('LOADOUT EMPTY -- NOTHING TO ATTACH.'); return; }
+            const buttons = avail.map(it => ({
+                label: '🎒 ' + it.name + ' x' + it.quantity,
+                action: () => { cmAttach.itemId = it.id; refreshAttachUi(); }
+            }));
+            buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)' });
+            showCustomPrompt('ATTACH ONE ITEM (x1) TO THIS TRANSMISSION:', buttons);
+        }
+
+        // max-800px JPEG 0.55 transit compression (extracted from sendPhotoMail, v0.44)
+        function compressMailPhoto(entry, cb) {
+            const img = new Image();
+            img.onload = function() {
+                let url = entryPip(entry);
+                try {
+                    const scale = Math.min(1, 800 / Math.max(img.width, img.height));
+                    if (scale < 1) {
+                        const cv = document.createElement('canvas');
+                        cv.width = Math.floor(img.width * scale);
+                        cv.height = Math.floor(img.height * scale);
+                        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+                        url = cv.toDataURL('image/jpeg', 0.55);
+                    }
+                } catch (e) {}
+                cb(url);
+            };
+            img.onerror = function() { cb(null); };
+            img.src = entryPip(entry);
+        }
+
         function transmitMsg() {
             const text = document.getElementById('cm-text').value.trim();
             if (!text) return showNotification('MESSAGE CANNOT BE EMPTY.');
             const t = composeTargetInfo(contactUidTarget); // v0.37: unlinked beacon targets allowed
             if (!t) return closeModals();
-            queueMail(t.uid, 'msg', { text: text.toUpperCase() }, 'MESSAGE');
-            mailLog.unshift({ dir: 'out', uid: t.uid, name: t.name, text: text.toUpperCase(), ts: Date.now() });
-            if (mailLog.length > 100) mailLog.pop();
-            saveComms();
+            const attach = { photo: cmAttach.photo || null, item: null };
+            if (cmAttach.itemId !== null) {
+                const it = items.find(x => x.id === cmAttach.itemId);
+                if (it) attach.item = { id: it.id, name: it.name, type: it.type, effects: it.effects };
+            }
             closeModals();
-            notifyTxResult();
+            const fire = (photoUrl) => {
+                const payload = { text: text.toUpperCase() };
+                if (photoUrl) payload.photo = photoUrl;
+                let summary = 'MESSAGE';
+                if (photoUrl) summary += ' 📷';
+                if (attach.item) {
+                    payload.item = { name: attach.item.name, type: attach.item.type, effects: attach.item.effects, quantity: 1 };
+                    summary += ' 🎒';
+                    // MOVE: escrow the attached item NOW (auto-refunded if DECLINED)
+                    const it = items.find(x => x.id === attach.item.id);
+                    if (it) {
+                        it.quantity -= 1;
+                        if (it.quantity <= 0) items.splice(items.indexOf(it), 1);
+                        saveToStorage();
+                        renderInventory(currentInvTab);
+                    }
+                }
+                queueMail(t.uid, 'msg', payload, summary);
+                const logEntry = { dir: 'out', uid: t.uid, name: t.name, text: text.toUpperCase(), ts: Date.now(), hasPhoto: !!photoUrl, itemName: attach.item ? attach.item.name : null };
+                mailLog.unshift(logEntry);
+                if (mailLog.length > 100) mailLog.pop();
+                if (photoUrl) makeMailThumb(photoUrl, thumb => {
+                    if (!thumb || mailLog.indexOf(logEntry) === -1) return;
+                    logEntry.photo = thumb;
+                    pruneMailPhotos();
+                    saveComms();
+                    if (mailTabActive()) renderMail();
+                });
+                saveComms();
+                notifyTxResult();
+            };
+            if (attach.photo) {
+                compressMailPhoto(attach.photo, url => {
+                    if (!url) { showNotification('PHOTO UNREADABLE -- TRANSMISSION ABORTED.'); return; }
+                    fire(url);
+                });
+            } else {
+                fire(null);
+            }
         }
 
         function transmitQuest() {
@@ -4186,9 +4489,14 @@
             }
 
             const c = contactByUid(contactUidTarget);
-            if (!c) return closeModals();
+            // v0.48: no more silent deaths — this used to close the composer with zero
+            // feedback and read as "the contract never went out"
+            if (!c) { closeModals(); showNotification('TARGET LINK LOST -- RESELECT THEIR DATACARD OR BEACON.'); return; }
             queueMail(c.uid, 'quest', { title: title.toUpperCase(), brief: brief, location: location, objectives: objectives, reward: reward, expireTime: expireTime, timeStr: timeStr }, 'QUEST: ' + title.toUpperCase());
             closeModals();
+            // v0.48: breadcrumb — issued quests track on YOUR side under CONTRACTS
+            // (QUESTS is for quests YOU hold), which is exactly where people look first
+            showNotification('CONTRACT ISSUED — TRACK IT UNDER DATA > CONTRACTS.');
             notifyTxResult();
         }
 
@@ -4271,7 +4579,7 @@
             // v0.33: mail is a FLAT feed of per-message entities (no outlook-style
             // folders/per-user grouping). Zone 1 = anything needing action, pinned top.
             // Zone 2 = one merged chronological history of sent + received transmissions.
-            const timeOf = (ts) => new Date(ts || Date.now()).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+            // v0.48: timeOf is now a global helper (contracts/rad panels use it too)
 
             // ---- ZONE 1: ACTION REQUIRED ----
             const inKeys = Object.keys(inboxLetters).sort((a, b) => (inboxLetters[b].ts || 0) - (inboxLetters[a].ts || 0));
@@ -4323,7 +4631,7 @@
                         // row into a wall of text) -- tap any row for the full message plus
                         // its photo; incoming rows keep their one-tap REPLY shortcut
                         const idx = mailLog.indexOf(m);
-                        const tag = m.fulfilledTitle ? ' ⚑' : (m.hasPhoto ? ' 📷' : '');
+                        const tag = (m.fulfilledTitle ? ' ⚑' : '') + (m.hasPhoto ? ' 📷' : '') + (m.itemName ? ' 🎒' : ''); // v0.47: stacked tags
                         const fullText = m.text || '';
                         const prev = fullText.length > 60 ? fullText.slice(0, 60) + '…' : fullText;
                         html += '<div style="border-bottom:1px dashed var(--pip-color-dim); padding:6px 0; font-size:1rem; display:flex; justify-content:space-between; gap:8px; align-items:center; cursor:pointer;" onclick="viewMailLogEntry(' + idx + ')"><span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"><span style="opacity:0.7;">' + (m.dir === 'in' ? '↓ FROM ' : '↑ TO ') + escapeHtml(m.name) + ' — ' + timeOf(m.ts) + ':</span> ' + escapeHtml(prev) + tag + '</span>' + (m.dir === 'in' && m.uid ? '<button class="theme-btn" style="flex-shrink:0;" onclick="event.stopPropagation(); composeTo(\'msg\', \'' + m.uid + '\')">[REPLY]</button>' : '') + '</div>';
@@ -4343,10 +4651,10 @@
             const stamp = (m.dir === 'in' ? 'FROM ' : 'TO ') + (m.name || 'UNKNOWN') + ' — ' + timeOf(m.ts);
             let body = m.text || '(NO TEXT)';
             if (m.fulfilledTitle) body = '⚑ FULFIL NOTICE — ' + m.fulfilledTitle + '\n\n' + body;
+            if (m.itemName) body += '\n\n🎒 ATTACHED ITEM: ' + m.itemName + ' x1'; // v0.47
             if (m.hasPhoto && !m.photo) {
-                body += (m.dir === 'in')
-                    ? '\n\n(IMAGE PURGED FROM LOG — DATABANK PRESSURE. FULL COPY: CHECK CAM DATABANK.)'
-                    : '\n\n(IMAGE PURGED FROM LOG — DATABANK PRESSURE.)';
+                // v0.48: mail is the only home for received photos now — no databank fallback
+                body += '\n\n(IMAGE PURGED FROM LOG — DATABANK PRESSURE.)';
             }
             const buttons = [];
             const myCopy = m.fulfilledTitle ? quests.find(q => q.name === String(m.fulfilledTitle).toUpperCase() && !q.completed) : null;
@@ -4467,6 +4775,7 @@
             if (window.db) {
                 startMailListener();
                 startPariahListener(); // v0.46
+                startRadZoneListener(); // v0.47
                 flushOutbox();
                 refreshOutboxStatuses();
                 renderMailBadge();
