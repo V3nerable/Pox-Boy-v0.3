@@ -3601,37 +3601,30 @@
             }
         }
 
-        // v0.48: GEIGER COUNTER — synthesized clicks for the rad engine (WebAudio,
-        // zero shipped assets, offline-first). Short filtered noise burst per click.
-        let geigerCtx = null;
+        // v0.49: REAL GEIGER VOICE — the field rattle is now the user's 24s geiger loop,
+        // shipped inline as geiger.mp3 and precached by the SW (fully offline). Each dose
+        // plays a short random SLICE of the loop instead of the whole clip.
+        let geigerPool = [];
+        let geigerTurn = 0;
         function geigerClick() {
             try {
-                if (!geigerCtx) geigerCtx = new (window.AudioContext || window.webkitAudioContext)();
-                if (geigerCtx.state === 'suspended') geigerCtx.resume();
-                const len = Math.floor(geigerCtx.sampleRate * 0.018); // ~18ms crack
-                const buf = geigerCtx.createBuffer(1, len, geigerCtx.sampleRate);
-                const data = buf.getChannelData(0);
-                for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
-                const src = geigerCtx.createBufferSource();
-                src.buffer = buf;
-                const hp = geigerCtx.createBiquadFilter();
-                hp.type = 'highpass';
-                hp.frequency.value = 3800;
-                const g = geigerCtx.createGain();
-                g.gain.value = 0.22;
-                src.connect(hp); hp.connect(g); g.connect(geigerCtx.destination);
-                src.start();
+                if (!geigerPool.length) {
+                    for (let i = 0; i < 2; i++) { const a = new Audio('geiger.mp3'); a.preload = 'auto'; geigerPool.push(a); }
+                }
+                const a = geigerPool[geigerTurn++ % geigerPool.length];
+                const durMs = (a.duration && isFinite(a.duration)) ? a.duration * 1000 : 0;
+                const slice = 450 + Math.random() * 350; // 0.45–0.80s of crackle per dose
+                a.currentTime = (durMs > slice + 200) ? (Math.random() * (durMs - slice)) / 1000 : 0;
+                a.volume = 0.9;
+                const stopAt = setTimeout(() => { try { a.pause(); } catch (e) {} }, slice);
+                a.play().catch(() => { clearTimeout(stopAt); }); // pre-gesture autoplay rejection: silence, never an error
             } catch (e) { /* audio unavailable: silence, never an error */ }
         }
-        // A field tick rattles 1–3 clicks like real counter pile-up
+        // A field tick = one crackle slice, with an occasional second piled on top
         function geigerBurst() {
-            const n = 1 + Math.floor(Math.random() * 3);
-            for (let i = 0; i < n; i++) setTimeout(geigerClick, i * (50 + Math.random() * 90));
+            geigerClick();
+            if (Math.random() < 0.25) setTimeout(geigerClick, 120 + Math.random() * 140);
         }
-        // Autoplay policy: first gesture of the session unlocks/resumes the context
-        document.addEventListener('pointerdown', () => {
-            if (geigerCtx && geigerCtx.state === 'suspended') geigerCtx.resume();
-        }, { passive: true });
 
         // v0.48: two clocks. Fields burn FAST (user: "1 every 5 seconds"), recovery stays
         // one rad per quiet minute — and the two still never run at once.

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pipboy-cache-v37';
+const CACHE_NAME = 'pipboy-cache-v38';
 
 const urlsToCache = [
   './',
@@ -9,6 +9,7 @@ const urlsToCache = [
   './icon.png',
   './icon-192.png',
   './icon-512.png',
+  './geiger.mp3',
   'https://fonts.googleapis.com/css2?family=VT323&display=swap'
 ];
 
