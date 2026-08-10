@@ -2331,6 +2331,7 @@
             Object.keys(lastKnownSharedPins).forEach(key => {
                 const p = lastKnownSharedPins[key];
                 if (!p || typeof p.lat !== 'number' || typeof p.lng !== 'number') return;
+                if (p.from && myMailUid && p.from === myMailUid) return; // v0.46: self-echo filter — your LOCAL marker already is your view of your broadcast; the diamond is for everyone else
                 if (!p.ts || (now - p.ts) > 72 * 60 * 60 * 1000) return; // stale: skip
                 const who = p.fromName ? (' — VIA ' + String(p.fromName).toUpperCase()) : '';
                 L.marker([p.lat, p.lng], {icon: sharedIcon, zIndexOffset: 500})
@@ -2504,6 +2505,7 @@
                     const lat = position.coords.latitude;
                     const lng = position.coords.longitude;
                     myLastLat = lat; myLastLng = lng; // feeds map wastelander-card distance readout
+                    evalPariahField(); // v0.46: snappy field entry/exit on every fresh fix (radTick backstops this minutely)
                     
                     btn.innerText = "[DISABLE GPS TRACKING]";
                     btn.style.background = "var(--pip-color-dim)";
@@ -2576,6 +2578,19 @@
                     <p>NUKA-COLAS DRUNK: 0</p>
                 `;
             }
+            // v0.46: PARIAH WATCH panel renders under dev-mode only; hiding fully when
+            // Overseer mode is off so players never see the control surface
+            const pariahEl = document.getElementById('overseer-pariahs');
+            if (pariahEl) {
+                const isDevMode = localStorage.getItem('pipboy-dev-mode') === 'true';
+                if (!isDevMode) {
+                    pariahEl.style.display = 'none';
+                    pariahEl.innerHTML = '';
+                } else {
+                    pariahEl.style.display = 'block';
+                    pariahEl.innerHTML = renderPariahPanel();
+                }
+            }
             // v0.35: roster lives on its own WASTELANDERS tab again; stats just reports
             if (currentDataTab === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
         }
@@ -2594,7 +2609,10 @@
                 document.getElementById('faction-controls').style.display = 'none';
                 document.getElementById('dev-add-marker-btn').style.display = 'none';
                 document.getElementById('dev-remove-marker-btn').style.display = 'none';
-                
+                // v0.46: PARIAH WATCH dies with Overseer mode
+                const opEl = document.getElementById('overseer-pariahs');
+                if (opEl) { opEl.style.display = 'none'; opEl.innerHTML = ''; }
+
                 // If we are currently in the action modal, hide the dev buttons there too
                 document.getElementById('dev-add-one-btn').style.display = 'none';
                 document.getElementById('dev-remove-one-btn').style.display = 'none';
@@ -3466,6 +3484,130 @@
             }, () => {}); // permission/offline errors: stay silent, we have local copies
         }
 
+        // ================= RADIATION ENGINE (v0.46) =================
+        // Two opposing 60-second processes, NEVER both at once:
+        //   inside a pariah's field -> +1 RAD/min ("taking rads damage")
+        //   everywhere else         -> -1 RAD/min passive recovery, floor 0
+        let pariahMarks = {};       // uid -> {name, ts}: mirror of the Firebase pariahs/ node
+        let radFieldActive = false; // hysteresis state: currently bathed in a pariah field
+        let radFieldPariah = null;  // name of the source, for status purposes
+
+        function adjustRads(delta) {
+            const before = userProfile.rads || 0;
+            const after = Math.min(1000, Math.max(0, before + delta));
+            if (after === before) return;
+            userProfile.rads = after;
+            saveToStorage();
+            renderProfile();
+        }
+
+        function evalPariahField() {
+            // The condemned do not fear their own shadow: a declared pariah is self-immune
+            if (myMailUid && pariahMarks[myMailUid]) {
+                radFieldActive = false;
+                radFieldPariah = null;
+                return;
+            }
+            let nearest = null;
+            if (myLastLat !== null && myLastLng !== null) {
+                Object.keys(pariahMarks).forEach(uid => {
+                    const b = lastKnownBeaconData[uid];
+                    // Stale signals do not irradiate: beacons older than 5 minutes are ignored
+                    if (!b || !b.timestamp || (Date.now() - b.timestamp) > 5 * 60 * 1000) return;
+                    if (typeof b.lat !== 'number' || typeof b.lng !== 'number') return;
+                    const d = getDistance(myLastLat, myLastLng, b.lat, b.lng);
+                    if (!nearest || d < nearest.d) {
+                        nearest = { d: d, name: ((pariahMarks[uid] || {}).name || b.name || 'PARIAH') };
+                    }
+                });
+            }
+            // Hysteresis: the field GRABS at 15m and RELEASES at 18m — no boundary flicker
+            if (!radFieldActive && nearest && nearest.d <= 15) {
+                radFieldActive = true;
+                radFieldPariah = nearest.name;
+                showNotification('⚠ RADIATION FIELD — PARIAH NEARBY');
+            } else if (radFieldActive && (!nearest || nearest.d > 18)) {
+                radFieldActive = false;
+                radFieldPariah = null;
+                showNotification('RADIATION FIELD CLEAR.');
+            }
+        }
+
+        function radTick() {
+            evalPariahField(); // cheap re-evaluation: beacons age even between GPS fixes
+            if (radFieldActive) adjustRads(1);
+            else adjustRads(-1); // v0.46: passive recovery — the body sheds 1 rad per quiet minute
+        }
+        setInterval(radTick, 60000);
+
+        // v0.46: the Overseer's pariah decrees (same watch pattern as the mailbox)
+        function startPariahListener() {
+            window.firebaseOnValue(window.firebaseRef(window.db, 'pariahs/'), (snap) => {
+                pariahMarks = snap.val() || {};
+                evalPariahField(); // a fresh decree can bathe you where you stand
+                if (currentDataTab === 'stats') renderStatsTab();
+            }, () => {}); // offline: last known decree list stands
+        }
+
+        // --- OVERSEER PARIAH CONTROL (STATS tab, dev-mode only) ---
+        function renderPariahPanel() {
+            let html = '<h2 style="color:#ff3333;">☢ PARIAH WATCH</h2>';
+            html += '<p style="font-size:0.95rem; opacity:0.75; line-height:1.4;">MARKED WASTELANDERS RADIATE A 15M FIELD: ANYONE INSIDE TAKES +1 RAD/MIN (ENTRY AT 15M, RELEASE AT 18M). SIGNALS STALE BEYOND 5MIN DO NOT IRRADIATE.</p>';
+            const marks = Object.keys(pariahMarks);
+            html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:15px 0 10px; opacity:0.8;">DECLARED PARIAHS</h3>';
+            if (!marks.length) {
+                html += '<p style="opacity:0.5;">NO PARIAHS DECLARED.</p>';
+            } else {
+                marks.forEach(uid => {
+                    const name = ((pariahMarks[uid] || {}).name) || uid;
+                    html += '<div class="item-row"><div class="item-info"><div style="color:#ff3333;">☢ ' + escapeHtml(name) + '</div><div class="item-effects">DECLARED ' + timeOf((pariahMarks[uid] || {}).ts || Date.now()) + '</div></div><button class="theme-btn" onclick="cleansePariah(\'' + escapeHtml(uid) + '\')">[CLEANSE]</button></div>';
+                });
+            }
+            // Candidate roster: fresh LIVE signals, not already marked, never yourself
+            const now = Date.now();
+            const cands = Object.keys(lastKnownBeaconData).filter(uid => {
+                if (uid === myMailUid || pariahMarks[uid]) return false;
+                const b = lastKnownBeaconData[uid];
+                return b && b.timestamp && (now - b.timestamp) <= 5 * 60 * 1000;
+            });
+            html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:15px 0 10px; opacity:0.8;">LIVE SIGNALS (5MIN)</h3>';
+            if (!cands.length) {
+                html += '<p style="opacity:0.5;">NO FRESH SIGNALS ON THE RADAR.</p>';
+            } else {
+                cands.forEach(uid => {
+                    const b = lastKnownBeaconData[uid];
+                    html += '<div class="item-row"><div class="item-info"><div>' + escapeHtml(b.name || 'UNKNOWN') + '</div></div><button class="theme-btn" style="color:#ff3333; border-color:#ff3333;" onclick="markPariah(\'' + escapeHtml(uid) + '\')">[MARK PARIAH]</button></div>';
+                });
+            }
+            return html;
+        }
+
+        function markPariah(uid) {
+            if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- DECREE NOT TRANSMITTED.'); return; }
+            const name = String(((lastKnownBeaconData[uid] || {}).name) || 'UNKNOWN').toUpperCase().substring(0, 32);
+            showCustomPrompt('DECLARE ' + name + ' A PARIAH? EVERY UNIT WITHIN 15M TAKES RADS UNTIL CLEANSED.', [
+                { label: 'MARK PARIAH', color: '#ff3333', action: () => {
+                    window.firebaseSet(window.firebaseRef(window.db, 'pariahs/' + uid), { name: name, ts: Date.now() })
+                        .then(() => showNotification('PARIAH DECLARED: ' + name))
+                        .catch(() => showNotification('DECREE FAILED -- CHECK SIGNAL.'));
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)' }
+            ]);
+        }
+
+        function cleansePariah(uid) {
+            if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- CLEANSE NOT TRANSMITTED.'); return; }
+            const name = String(((pariahMarks[uid] || {}).name) || uid).toUpperCase();
+            showCustomPrompt('CLEANSE ' + name + '? THEIR RADIATION FIELD DIES IMMEDIATELY FOR ALL UNITS.', [
+                { label: 'CLEANSE', action: () => {
+                    window.firebaseRemove(window.firebaseRef(window.db, 'pariahs/' + uid))
+                        .then(() => showNotification('PARIAH CLEANSED: ' + name))
+                        .catch(() => showNotification('CLEANSE FAILED -- CHECK SIGNAL.'));
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)' }
+            ]);
+        }
+
         function processInboxSnapshot(data) {
             let changedSeen = false;
             inboxLetters = {};
@@ -4324,6 +4466,7 @@
         function initComms() {
             if (window.db) {
                 startMailListener();
+                startPariahListener(); // v0.46
                 flushOutbox();
                 refreshOutboxStatuses();
                 renderMailBadge();
