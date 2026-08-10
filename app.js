@@ -5,19 +5,28 @@
         function openVk(elementId) {
             activeVkTarget = document.getElementById(elementId);
             if (!activeVkTarget) return;
-            
+
             // Mask password characters if we are editing the auth code
+            // (single-line deck only; the growing deck is never a secret)
             const inputEl = document.getElementById('vk-input');
-            if (activeVkTarget.type === 'password') {
-                inputEl.type = 'password';
-            } else {
-                inputEl.type = 'text';
-            }
-            
-            inputEl.value = activeVkTarget.value;
+            inputEl.type = (activeVkTarget.type === 'password') ? 'password' : 'text';
+
+            // v0.45: the keyboard now shows its OWN growing field for long-form targets --
+            // before this, the composer textarea grew BEHIND the keyboard overlay where no
+            // one could see it, while the visible deck stayed a single scrolling line
+            const multiEl = document.getElementById('vk-multi');
+            const isMulti = !!(activeVkTarget.classList && activeVkTarget.classList.contains('grow'));
+            inputEl.style.display = isMulti ? 'none' : '';
+            multiEl.style.display = isMulti ? 'block' : 'none';
+
+            const displayEl = isMulti ? multiEl : inputEl;
+            displayEl.value = activeVkTarget.value;
             vkCursorPos = activeVkTarget.value.length;
-            autoGrowEl(activeVkTarget); // v0.44: seated composer field sizes to its content
+
             document.getElementById('keyboard-modal').style.display = 'flex';
+            // growth is seated AFTER the modal is visible: scrollHeight reads 0 while hidden
+            autoGrowEl(displayEl);
+            autoGrowEl(activeVkTarget);
         }
 
         // v0.44: message field grows UPWARD as it fills (instead of hiding overflow),
@@ -28,31 +37,42 @@
             el.style.height = Math.min(el.scrollHeight, Math.floor(window.innerHeight * 0.4)) + 'px';
         }
 
+        // v0.45: which on-keyboard deck is live -- the growing multi-line deck for
+        // long-form targets (.grow), the single-line input for everything else
+        function vkDisplayEl() {
+            const multi = activeVkTarget && activeVkTarget.classList && activeVkTarget.classList.contains('grow');
+            return document.getElementById(multi ? 'vk-multi' : 'vk-input');
+        }
+
         function vkPress(char) {
-            const input = document.getElementById('vk-input');
+            const input = vkDisplayEl();
             const val = input.value;
             input.value = val.slice(0, vkCursorPos) + char + val.slice(vkCursorPos);
             vkCursorPos++;
-            
+
             // Auto update target so passwords look responsive
             if (activeVkTarget) activeVkTarget.value = input.value;
-            autoGrowEl(activeVkTarget);
+            autoGrowEl(input);          // v0.45: the VISIBLE deck stretches too
+            autoGrowEl(activeVkTarget); // v0.44: composer behind mirrors content size
         }
 
         function vkBackspace() {
-            const input = document.getElementById('vk-input');
+            const input = vkDisplayEl();
             const val = input.value;
             if (vkCursorPos > 0) {
                 input.value = val.slice(0, vkCursorPos - 1) + val.slice(vkCursorPos);
                 vkCursorPos--;
             }
             if (activeVkTarget) activeVkTarget.value = input.value;
+            autoGrowEl(input);
             autoGrowEl(activeVkTarget);
         }
 
+        // ENTER = DONE (Telegram spec: text auto-wraps, no manual line-break key)
         function vkConfirm() {
             if (activeVkTarget) {
-                activeVkTarget.value = document.getElementById('vk-input').value;
+                activeVkTarget.value = vkDisplayEl().value;
+                autoGrowEl(activeVkTarget);
             }
             vkCancel();
         }
@@ -1338,8 +1358,35 @@
             if (b && localStorage.getItem('pipboy-mail-ping') === '0') b.innerText = '[MAIL PING: OFF]';
         })();
 
+        // ================= NOTIFICATION PREFERENCES (v0.45, OPTIONS-gated) =================
+        // Per-category switches for TRANSMISSION alerts. Each gates BOTH the in-app toast
+        // and the OS ping for its category (ping still respects the MAIL PING master
+        // switch + the silent-while-reading rule). System notices — radiation, waypoint
+        // discoveries, broadcast results — are unaffected on purpose.
+        function notifyPref(cat) { return localStorage.getItem('pipboy-notify-' + cat) !== '0'; } // default ON
+        function cycleNotify(cat, btnId, label) {
+            const on = !notifyPref(cat);
+            localStorage.setItem('pipboy-notify-' + cat, on ? '1' : '0');
+            const b = document.getElementById(btnId);
+            if (b) b.innerText = '[NOTIFY ' + label + ': ' + (on ? 'ON' : 'OFF') + ']';
+            showNotification('NOTIFY ' + label + ' ' + (on ? 'ON.' : 'OFF.'));
+        }
+        // Boot label sync (all default ON)
+        (function() {
+            [['msg', 'options-nmsg-btn', 'MESSAGES'],
+             ['contract', 'options-ncon-btn', 'CONTRACTS'],
+             ['link', 'options-nlnk-btn', 'LINKS']].forEach(cfg => {
+                const b = document.getElementById(cfg[1]);
+                if (b && localStorage.getItem('pipboy-notify-' + cfg[0]) === '0') b.innerText = '[NOTIFY ' + cfg[2] + ': OFF]';
+            });
+        })();
+
         // Custom in-app confirmation replacement
         function showCustomPrompt(text, buttons) {
+            // v0.45: the shared prompt can carry an image (mail photo viewer) — reset it
+            // on every open so an old photo never bleeds into an unrelated query
+            const cpImg = document.getElementById('cp-img');
+            if (cpImg) { cpImg.style.display = 'none'; cpImg.removeAttribute('src'); }
             document.getElementById('cp-text').innerText = text;
             const btnContainer = document.getElementById('cp-buttons');
             // v0.38: long button lists (e.g. mail recipient picker with a big rolodex)
@@ -3174,6 +3221,9 @@
         let mailProcessed = JSON.parse(localStorage.getItem('pipboy-mail-processed') || '[]');
         let inboxLetters = {};       // live mailbox snapshot, trusted senders only
         let unverifiedLetters = {};  // live quarantine bucket, unknown senders
+        // v0.45: parked link requests (NOTIFY LINKS off = datacard scans wait quietly
+        // as a MAIL tab row instead of jumping a pop-up in your face)
+        let linkScans = JSON.parse(localStorage.getItem('pipboy-linkscans') || '{}');
         let contactUidTarget = null; // recipient of the current composer / contact sheet
         let selectedBeaconUid = null;
         let lastKnownBeaconData = {};
@@ -3185,6 +3235,7 @@
             localStorage.setItem('pipboy-outbox', JSON.stringify(outbox));
             localStorage.setItem('pipboy-maillog', JSON.stringify(mailLog));
             localStorage.setItem('pipboy-mail-seen', JSON.stringify(mailSeen.slice(-500)));
+            localStorage.setItem('pipboy-linkscans', JSON.stringify(linkScans)); // v0.45
         }
         function saveProcessed() {
             localStorage.setItem('pipboy-mail-processed', JSON.stringify(mailProcessed.slice(-500)));
@@ -3370,13 +3421,22 @@
                             e.status = 'fulfilled';
                         } else if (v.claimed) {
                             e.status = 'accepted';
+                            // v0.45: senders used to get SILENCE when a contract/shipment was
+                            // picked up — the feed just flipped quietly. Now it tells you,
+                            // gated by NOTIFY CONTRACTS
+                            if (notifyPref('contract')) {
+                                const who = String((contactByUid(e.to) || {}).name || e.to).toUpperCase();
+                                const what = e.type === 'quest' ? 'CONTRACT' : (e.type === 'item' ? 'SHIPMENT' : 'TRANSMISSION');
+                                showNotification(what + ' ACCEPTED BY ' + who);
+                                mailPingOs(what + ' ACCEPTED BY ' + who);
+                            }
                         } else if (v.declined) {
                             e.status = 'declined';
                             // MOVE policy: a declined shipment returns the goods to the sender
                             if (e.type === 'item' && !e.refunded) {
                                 refundItemPayload(e.payload);
                                 e.refunded = true;
-                                showNotification('TRANSMISSION DECLINED — ITEM RETURNED TO INVENTORY.');
+                                if (notifyPref('contract')) showNotification('TRANSMISSION DECLINED — ITEM RETURNED TO INVENTORY.');
                             }
                         }
                     })
@@ -3422,11 +3482,15 @@
                 if (l.type === 'handshake') {
                     if (isContact(l.from)) {
                         // Link already mutual: retire the letter silently
+                        if (linkScans[key]) { delete linkScans[key]; changedSeen = true; } // v0.45: parked scan resolved elsewhere
                         retireLetter(key);
                         continue;
                     }
                     if (mailSeen.indexOf(key) === -1) {
                         mailSeen.push(key); changedSeen = true;
+                        // v0.45: NOTIFY LINKS off = no pop-up; the scan parks as a MAIL
+                        // tab row and waits for YOU to tap it
+                        if (!notifyPref('link')) { linkScans[key] = l; continue; }
                         showCustomPrompt((l.fromName || 'UNKNOWN') + ' HAS SCANNED YOUR DATACARD. ADD THEM TO WASTELANDERS MET?', [
                             {
                                 label: 'ACCEPT LINK',
@@ -3445,8 +3509,11 @@
                     inboxLetters[key] = l;
                     if (mailSeen.indexOf(key) === -1) {
                         mailSeen.push(key); changedSeen = true;
-                        showNotification('INCOMING TRANSMISSION — ' + (l.fromName || 'UNKNOWN') + ': ' + typeSummary(l));
-                        mailPingOs('NEW TRANSMISSION FROM ' + (l.fromName || 'UNKNOWN') + ' -- ' + typeSummary(l));
+                        // v0.45: NOTIFY MESSAGES gates both the toast and the OS ping
+                        if (notifyPref('msg')) {
+                            showNotification('INCOMING TRANSMISSION — ' + (l.fromName || 'UNKNOWN') + ': ' + typeSummary(l));
+                            mailPingOs('NEW TRANSMISSION FROM ' + (l.fromName || 'UNKNOWN') + ' -- ' + typeSummary(l));
+                        }
                         // v0.44: linked-sender photos land straight in the DATABANK at first sight
                         if (l.type === 'msg' && l.payload && l.payload.photo) autoSaveMailPhoto(key);
                     }
@@ -3454,8 +3521,11 @@
                     stillUnverified[key] = l;
                     if (mailSeen.indexOf(key) === -1) {
                         mailSeen.push(key); changedSeen = true;
-                        showNotification('UNTRUSTED TRANSMISSION HELD IN MAIL QUARANTINE. SCAN THEIR DATACARD TO UNLOCK.');
-                        mailPingOs('UNTRUSTED TRANSMISSION HELD IN MAIL QUARANTINE.');
+                        // v0.45: NOTIFY MESSAGES gates the quarantine hold alert too
+                        if (notifyPref('msg')) {
+                            showNotification('UNTRUSTED TRANSMISSION HELD IN MAIL QUARANTINE. SCAN THEIR DATACARD TO UNLOCK.');
+                            mailPingOs('UNTRUSTED TRANSMISSION HELD IN MAIL QUARANTINE.');
+                        }
                     }
                 }
             }
@@ -3508,6 +3578,30 @@
             ]);
         }
 
+        // v0.45: a PARKED link scan (NOTIFY LINKS off) is the same decision, on YOUR schedule
+        function openLinkScan(key) {
+            const l = linkScans[key];
+            if (!l) return;
+            const settle = () => {
+                delete linkScans[key];
+                saveComms();
+                retireLetter(key);
+                renderMailBadge();
+                if (mailTabActive()) renderMail();
+            };
+            showCustomPrompt((l.fromName || 'UNKNOWN') + ' HAS SCANNED YOUR DATACARD. ADD THEM TO WASTELANDERS MET?', [
+                {
+                    label: 'ACCEPT LINK',
+                    action: () => {
+                        addContact(safeUid(l.from), (l.fromName || 'UNKNOWN').toUpperCase());
+                        settle();
+                        if (currentDataTab === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
+                    }
+                },
+                { label: 'IGNORE', color: 'var(--pip-color-dim)', action: settle }
+            ]);
+        }
+
         function openMailItem(key, src) {
             const l = (src === 'unverified') ? unverifiedLetters[key] : inboxLetters[key];
             if (!l) return;
@@ -3544,19 +3638,55 @@
             }
         }
 
+        // v0.45: compact log-copy thumbs so PHOTO TRANSMISSIONS stay viewable from the
+        // feed (full-size received copies still land in the CAM databank via auto-save)
+        function makeMailThumb(dataURI, cb) {
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    const s = Math.min(1, 480 / Math.max(img.width, img.height));
+                    const cv = document.createElement('canvas');
+                    cv.width = Math.max(1, Math.floor(img.width * s));
+                    cv.height = Math.max(1, Math.floor(img.height * s));
+                    cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+                    cb(cv.toDataURL('image/jpeg', 0.45));
+                } catch (e) { cb(null); }
+            };
+            img.onerror = () => cb(null);
+            img.src = dataURI;
+        }
+
+        // Storage guard: image data rides the newest 20 photo log entries only; older
+        // rows degrade to text + 📷 flag (same DATABANK-PRESSURE philosophy as the cam archive)
+        function pruneMailPhotos() {
+            let kept = 0;
+            mailLog.forEach(m => {
+                if (m.photo) { kept++; if (kept > 20) delete m.photo; }
+            });
+        }
+
         function acceptMsg(key, l) {
             // v0.44: photo payloads auto-save to DATABANK here too (covers letters that
             // arrived via the UNVERIFIED quarantine gate -- promoted letters never re-fire
             // the first-sight auto-save in processInboxSnapshot)
             if (l.payload && l.payload.photo) autoSaveMailPhoto(key);
-            mailLog.unshift({
+            const logEntry = {
                 dir: 'in', uid: safeUid(l.from), name: (l.fromName || 'UNKNOWN'),
                 text: (l.payload.text || (l.payload && l.payload.photo ? '📷 PHOTO TRANSMISSION' : '')),
                 ts: l.ts || Date.now(),
                 hasPhoto: !!(l.payload && l.payload.photo),
                 fulfilledTitle: (l.payload && l.payload.fulfilledTitle) || null
-            });
+            };
+            mailLog.unshift(logEntry);
             if (mailLog.length > 100) mailLog.pop();
+            // v0.45: small thumb copy so the received photo opens from the feed
+            if (logEntry.hasPhoto) makeMailThumb(l.payload.photo, thumb => {
+                if (!thumb || mailLog.indexOf(logEntry) === -1) return;
+                logEntry.photo = thumb;
+                pruneMailPhotos();
+                saveComms();
+                if (mailTabActive()) renderMail();
+            });
             flagLetter(key, 'claimed');
             markProcessed(key);
             saveComms();
@@ -3646,7 +3776,8 @@
             if (!el) return;
             const n = Object.keys(inboxLetters).length;
             const u = Object.keys(unverifiedLetters).length;
-            el.innerText = 'MAIL' + (n ? ' (' + n + ')' : '') + (u ? ' (' + u + '?)' : '');
+            const k = Object.keys(linkScans).length; // v0.45: parked link requests count too
+            el.innerText = 'MAIL' + (n ? ' (' + n + ')' : '') + (u ? ' (' + u + '?)' : '') + (k ? ' (' + k + ' LINK' + (k > 1 ? 'S' : '') + ')' : '');
         }
 
         function renderWastelanders() {
@@ -3790,8 +3921,17 @@
                     }
                 } catch (e) {}
                 queueMail(c.uid, 'msg', { text: '📷 PHOTO TRANSMISSION', photo: url }, 'PHOTO');
-                mailLog.unshift({ dir: 'out', uid: c.uid, name: c.name, text: '📷 PHOTO TRANSMISSION', ts: Date.now(), hasPhoto: true });
+                // v0.45: SENT photos keep a thumb on the log entry — viewable from the feed
+                const logEntry = { dir: 'out', uid: c.uid, name: c.name, text: '📷 PHOTO TRANSMISSION', ts: Date.now(), hasPhoto: true };
+                mailLog.unshift(logEntry);
                 if (mailLog.length > 100) mailLog.pop();
+                makeMailThumb(url, thumb => {
+                    if (!thumb || mailLog.indexOf(logEntry) === -1) return;
+                    logEntry.photo = thumb;
+                    pruneMailPhotos();
+                    saveComms();
+                    if (mailTabActive()) renderMail();
+                });
                 saveComms();
                 closeModals();
                 notifyTxResult();
@@ -3994,7 +4134,8 @@
             // ---- ZONE 1: ACTION REQUIRED ----
             const inKeys = Object.keys(inboxLetters).sort((a, b) => (inboxLetters[b].ts || 0) - (inboxLetters[a].ts || 0));
             const uKeys = Object.keys(unverifiedLetters).sort((a, b) => (unverifiedLetters[b].ts || 0) - (unverifiedLetters[a].ts || 0));
-            if (inKeys.length || uKeys.length) {
+            const lsKeys = Object.keys(linkScans).sort((a, b) => (linkScans[b].ts || 0) - (linkScans[a].ts || 0)); // v0.45: parked link scans
+            if (inKeys.length || uKeys.length || lsKeys.length) {
                 html += '<h3 style="border-bottom:2px solid var(--pip-color); padding-bottom:5px; margin-bottom:10px;">⚠ ACTION REQUIRED</h3>';
                 inKeys.forEach(k => {
                     const l = inboxLetters[k];
@@ -4003,6 +4144,10 @@
                 uKeys.forEach(k => {
                     const l = unverifiedLetters[k];
                     html += '<div class="item-row" style="opacity:0.8;" onclick="openUntrusted(\'' + k + '\')"><div class="item-info"><div>⚠ UNTRUSTED ' + escapeHtml((l.type || '???').toUpperCase()) + '</div><div class="item-effects">CLAIMS TO BE: ' + escapeHtml(l.fromName || 'UNKNOWN') + ' — TAP FOR OPTIONS</div></div><div class="item-qty">?</div></div>';
+                });
+                lsKeys.forEach(k => {
+                    const l = linkScans[k];
+                    html += '<div class="item-row" onclick="openLinkScan(\'' + k + '\')"><div class="item-info"><div>⇄ LINK REQUEST (PARKED)</div><div class="item-effects">FROM: ' + escapeHtml(l.fromName || 'UNKNOWN') + ' — ' + timeOf(l.ts) + ' — TAP TO DECIDE</div></div><div class="item-qty">?</div></div>';
                 });
             }
 
@@ -4013,11 +4158,11 @@
             mailLog.forEach(m => history.push({ ts: m.ts || 0, kind: 'log', m: m }));
             history.sort((a, b) => b.ts - a.ts);
 
-            if (inKeys.length || uKeys.length || history.length) {
+            if (inKeys.length || uKeys.length || lsKeys.length || history.length) {
                 html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:20px 0 10px; opacity:0.8;">TRANSMISSIONS</h3>';
             }
             if (!history.length) {
-                if (!inKeys.length && !uKeys.length) {
+                if (!inKeys.length && !uKeys.length && !lsKeys.length) {
                     html += '<p style="text-align:center; opacity:0.5; margin-top:30px;">NO TRANSMISSIONS YET.<br>SCAN A WASTELANDER\'S DATACARD TO START TALKING.</p>';
                 } else {
                     html += '<p style="opacity:0.5;">NOTHING SENT OR LOGGED YET.</p>';
@@ -4032,14 +4177,53 @@
                         html += '<div class="item-row" style="cursor:default;"><div class="item-info"><div>↑ ' + escapeHtml(e.summary) + ' → ' + escapeHtml(c ? c.name : e.to) + '</div><div class="item-effects">' + escapeHtml(statusLabel(e)) + ' — ' + timeOf(e.ts) + '</div></div>' + (clearable ? '<button class="theme-btn" onclick="clearOutboxEntry(\'' + e.id + '\')">[X]</button>' : '') + '</div>';
                     } else {
                         const m = h.m;
-                        // v0.44: ⚑ flag on fulfil notices, 📷 on photo transmissions,
-                        // and every incoming row carries a one-tap REPLY
+                        // v0.45: rows are one-line PREVIEWS (a long message used to blow the
+                        // row into a wall of text) -- tap any row for the full message plus
+                        // its photo; incoming rows keep their one-tap REPLY shortcut
+                        const idx = mailLog.indexOf(m);
                         const tag = m.fulfilledTitle ? ' ⚑' : (m.hasPhoto ? ' 📷' : '');
-                        html += '<div style="border-bottom:1px dashed var(--pip-color-dim); padding:6px 0; font-size:1rem; display:flex; justify-content:space-between; gap:8px; align-items:center;"><span><span style="opacity:0.7;">' + (m.dir === 'in' ? '↓ FROM ' : '↑ TO ') + escapeHtml(m.name) + ' — ' + timeOf(m.ts) + ':</span> ' + escapeHtml(m.text || '') + tag + '</span>' + (m.dir === 'in' && m.uid ? '<button class="theme-btn" style="flex-shrink:0;" onclick="composeTo(\'msg\', \'' + m.uid + '\')">[REPLY]</button>' : '') + '</div>';
+                        const fullText = m.text || '';
+                        const prev = fullText.length > 60 ? fullText.slice(0, 60) + '…' : fullText;
+                        html += '<div style="border-bottom:1px dashed var(--pip-color-dim); padding:6px 0; font-size:1rem; display:flex; justify-content:space-between; gap:8px; align-items:center; cursor:pointer;" onclick="viewMailLogEntry(' + idx + ')"><span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"><span style="opacity:0.7;">' + (m.dir === 'in' ? '↓ FROM ' : '↑ TO ') + escapeHtml(m.name) + ' — ' + timeOf(m.ts) + ':</span> ' + escapeHtml(prev) + tag + '</span>' + (m.dir === 'in' && m.uid ? '<button class="theme-btn" style="flex-shrink:0;" onclick="event.stopPropagation(); composeTo(\'msg\', \'' + m.uid + '\')">[REPLY]</button>' : '') + '</div>';
                     }
                 });
             }
             el.innerHTML = html;
+        }
+
+        // v0.45: full message viewer — tapped from any TRANSMISSIONS row. Long text
+        // scrolls INSIDE the box (40vh cap set on #cp-text, buttons always stay on
+        // screen), photo thumbs render above the text, fulfil notices can still
+        // complete YOUR copy, incoming rows carry REPLY.
+        function viewMailLogEntry(i) {
+            const m = mailLog[i];
+            if (!m) return;
+            const stamp = (m.dir === 'in' ? 'FROM ' : 'TO ') + (m.name || 'UNKNOWN') + ' — ' + timeOf(m.ts);
+            let body = m.text || '(NO TEXT)';
+            if (m.fulfilledTitle) body = '⚑ FULFIL NOTICE — ' + m.fulfilledTitle + '\n\n' + body;
+            if (m.hasPhoto && !m.photo) {
+                body += (m.dir === 'in')
+                    ? '\n\n(IMAGE PURGED FROM LOG — DATABANK PRESSURE. FULL COPY: CHECK CAM DATABANK.)'
+                    : '\n\n(IMAGE PURGED FROM LOG — DATABANK PRESSURE.)';
+            }
+            const buttons = [];
+            const myCopy = m.fulfilledTitle ? quests.find(q => q.name === String(m.fulfilledTitle).toUpperCase() && !q.completed) : null;
+            if (myCopy) {
+                buttons.push({ label: 'MARK MY COPY COMPLETE', action: () => {
+                    myCopy.completed = true;
+                    saveToStorage();
+                    renderQuests();
+                    showNotification('YOUR COPY MARKED COMPLETE: ' + myCopy.name);
+                }});
+            }
+            if (m.dir === 'in' && m.uid) buttons.push({ label: 'REPLY', action: () => composeTo('msg', m.uid) });
+            buttons.push({ label: 'CLOSE', color: 'var(--pip-color-dim)' });
+            showCustomPrompt(stamp + '\n\n' + body, buttons);
+            // cp modal is open now — hang the photo on it if one survived the storage guard
+            if (m.photo) {
+                const img = document.getElementById('cp-img');
+                if (img) { img.src = m.photo; img.style.display = 'block'; }
+            }
         }
 
         function statusLabel(e) {
