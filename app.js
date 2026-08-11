@@ -2247,6 +2247,8 @@
         let lastKnownSharedPins = {};
         let radZonesGroup = null;          // v0.47: Overseer hot zones (static fields)
         let lastKnownRadZones = {};
+        let zoneMarkerRefs = {};           // v0.51: zoneKey -> diamond marker, for select-to-reveal labels
+        let selectedZoneKey = null;        // v0.51: tapped zone pins the map card + shows its label
         let userMarker = null;
         let gpsWatchId = null;
         let liveTrackingEnabled = false;
@@ -2277,8 +2279,8 @@
                 openAddWaypointModal(e.latlng.lat, e.latlng.lng);
             });
 
-            // Tapping empty map clears the sticky wastelander selection
-            pipMap.on('click', function() { if (selectedBeaconUid) deselectBeacon(); });
+            // Tapping empty map clears the sticky selection (beacon OR zone, v0.51)
+            pipMap.on('click', function() { if (selectedBeaconUid || selectedZoneKey) deselectBeacon(); });
 
             markersGroup = L.layerGroup().addTo(pipMap);
             otherPlayersGroup = L.layerGroup().addTo(pipMap);
@@ -2390,20 +2392,36 @@
                     color: color, weight: 1.5, dashArray: '6 4',
                     fillColor: color, fillOpacity: 0.07
                 }).addTo(radZonesGroup);
+                // v0.51 (user: "labels not live -- only if selected, keep the zones up"):
+                // the fence stays drawn always, but the label tooltip is no longer
+                // permanent -- it appears only while the zone is SELECTED. The full
+                // fence ring is the tap target (comfortable on phones), the diamond too.
+                const fence = L.circle([z.lat, z.lng], {
+                    radius: (typeof z.radius === 'number' ? z.radius : 15),
+                    color: color, weight: 1.5, dashArray: '6 4',
+                    fillColor: color, fillOpacity: 0.07
+                }).addTo(radZonesGroup);
+                fence.on('click', (e) => { L.DomEvent.stopPropagation(e.originalEvent); selectZone(zk); });
                 const zoneIcon = L.divIcon({
                     className: 'custom-pip-marker',
                     html: '<div style="width: 14px; height: 14px; transform: rotate(45deg); border: 2px dashed ' + color + '; background: transparent; box-shadow: 0 0 12px ' + color + ';"></div>',
                     iconSize: [14, 14],
                     iconAnchor: [7, 7]
                 });
-                L.marker([z.lat, z.lng], {icon: zoneIcon, zIndexOffset: 450})
+                const zm = L.marker([z.lat, z.lng], {icon: zoneIcon, zIndexOffset: 450})
                     .bindTooltip(glyph + ' ' + String(z.label || (med ? 'MED ZONE' : 'HOT ZONE')).toUpperCase(), {
-                        permanent: true,
+                        permanent: false,
                         direction: 'bottom',
                         className: 'pip-tooltip'
                     })
                     .addTo(radZonesGroup);
+                zm.on('click', (e) => { L.DomEvent.stopPropagation(e.originalEvent); selectZone(zk); });
+                zoneMarkerRefs[zk] = zm;
+                if (zk === selectedZoneKey) zm.openTooltip(); // keep the label up across radzones/ refreshes
             });
+            // v0.51: the selected zone was extinguished under us -> drop the card
+            if (selectedZoneKey && !zoneMarkerRefs[selectedZoneKey]) deselectZone();
+            else if (selectedZoneKey) updateZoneCard();
         }
 
         function renderMarkers() {
@@ -2590,11 +2608,17 @@
                     // Push live location to Firebase!
                     if (window.db) {
                         const myRef = window.firebaseRef(window.db, 'wastelanders/' + myUid);
+                        // v0.51 LINK TELEMETRY: hp/rads ride the beacon as OPTIONAL numerics
+                        // (same floor formula as the HP bar) so linked contacts get medic intel.
+                        // Pre-v0.51 units omit them -- rules validate them optional, 0..1000.
+                        const myRads = userProfile.rads || 0;
                         window.firebaseSet(myRef, {
                             name: (userProfile.name || 'UNKNOWN').slice(0, 24), // rules cap name at 24 chars
                             lat: lat,
                             lng: lng,
-                            timestamp: Date.now()
+                            timestamp: Date.now(),
+                            hp: Math.max(0, userProfile.maxHp - Math.floor((myRads / 1000) * userProfile.maxHp)),
+                            rads: myRads
                         });
                         // Removed auto-delete on disconnect. The last known location will stay forever!
                     }
@@ -3784,12 +3808,19 @@
             ]);
         }
 
+        // v0.51: reachable from the STATS panel AND the map zone card; copy is
+        // kind-aware (it always said HOT ZONE before, even for ✚ MED zones).
         function extinguishZone(key) {
             if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- ORDER NOT TRANSMITTED.'); return; }
-            showCustomPrompt('EXTINGUISH THIS HOT ZONE? ITS FIELD DIES IMMEDIATELY FOR ALL UNITS.', [
+            const z = lastKnownRadZones[key];
+            const noun = (z && z.kind === 'med') ? 'MED ZONE' : 'HOT ZONE';
+            showCustomPrompt('EXTINGUISH THIS ' + noun + '? ITS FIELD DIES IMMEDIATELY FOR ALL UNITS.', [
                 { label: 'EXTINGUISH', action: () => {
                     window.firebaseRemove(window.firebaseRef(window.db, 'radzones/' + key))
-                        .then(() => showNotification('HOT ZONE EXTINGUISHED.'))
+                        .then(() => {
+                            showNotification(noun + ' EXTINGUISHED.');
+                            if (selectedZoneKey === key) deselectZone(); // v0.51: clear the pinned card
+                        })
                         .catch(() => showNotification('ORDER FAILED -- CHECK SIGNAL.'));
                 }},
                 { label: 'CANCEL', color: 'var(--pip-color-dim)' }
@@ -4161,6 +4192,11 @@
                 if (b2 && b2.timestamp) {
                     const m = Math.floor((Date.now() - b2.timestamp) / 60000);
                     presence = m < 5 ? 'LIVE SIGNAL' : ('LKL ' + m + 'M AGO');
+                    // v0.51 LINK TELEMETRY: contacts broadcast hp/rads with their fix; the
+                    // roster line carries them with the signal's own staleness tag.
+                    if (typeof b2.hp === 'number' && typeof b2.rads === 'number') {
+                        presence += ' | HP ' + b2.hp + ' | ' + b2.rads + ' RADS' + (m < 5 ? '' : ' (AT LAST SEEN)');
+                    }
                 }
                 const row = document.createElement('div');
                 row.className = 'item-row';
@@ -4826,12 +4862,68 @@
         // --- MAP STICKY-SELECT (tap a wastelander beacon) ---
         function selectBeacon(uid) {
             selectedBeaconUid = safeUid(uid);
+            deselectZone(); // v0.51: one selection at a time -- clears zone label/card
             updateMapUserCard();
         }
         function deselectBeacon() {
             selectedBeaconUid = null;
+            deselectZone(); // v0.51: [X] / map-tap / GPS-off clear zone selections as well
             const card = document.getElementById('map-user-card');
             if (card) card.style.display = 'none';
+            const nm = document.getElementById('muc-name');
+            if (nm) nm.style.color = ''; // v0.51: zone cards colour the name -- never bleed onto beacons
+        }
+        // v0.51: ZONE STICKY-SELECT. Zones render as silent fences (labels no longer live,
+        // per user); tapping the fence or its diamond reveals the label + pins the card.
+        // Overseer (dev mode) units get [EXTINGUISH] right here on the map -- no STATS trip.
+        function selectZone(zk) {
+            if (selectedBeaconUid) selectedBeaconUid = null; // one card at a time
+            if (selectedZoneKey && selectedZoneKey !== zk) {
+                const prev = zoneMarkerRefs[selectedZoneKey];
+                if (prev) prev.closeTooltip();
+            }
+            selectedZoneKey = zk;
+            const zm = zoneMarkerRefs[zk];
+            if (zm) zm.openTooltip();
+            updateZoneCard();
+        }
+        function deselectZone() {
+            if (selectedZoneKey) {
+                const zm = zoneMarkerRefs[selectedZoneKey];
+                if (zm) zm.closeTooltip();
+                selectedZoneKey = null;
+            }
+            const card = document.getElementById('map-user-card');
+            if (card && !selectedBeaconUid) card.style.display = 'none';
+        }
+        function updateZoneCard() {
+            const card = document.getElementById('map-user-card');
+            if (!card) return;
+            const zk = selectedZoneKey;
+            if (!zk) return;
+            const z = lastKnownRadZones[zk];
+            if (!z) { deselectZone(); return; }
+            const med = z.kind === 'med';
+            const color = med ? '#5fc98e' : '#ff3333';
+            const nameEl = document.getElementById('muc-name');
+            nameEl.innerText = (med ? '✚ ' : '☢ ') + String(z.label || (med ? 'MED ZONE' : 'HOT ZONE')).toUpperCase();
+            nameEl.style.color = color;
+            const radius = (typeof z.radius === 'number' ? z.radius : 15);
+            let info = med
+                ? 'MED SHELTER | ' + radius + 'M RADIUS | SHEDS 5 RADS/MIN INSIDE'
+                : 'RADIATION FIELD | ' + radius + 'M RADIUS | +1 RAD/5SEC INSIDE';
+            if (myLastLat !== null && typeof z.lat === 'number' && typeof z.lng === 'number') {
+                const d = getDistance(myLastLat, myLastLng, z.lat, z.lng);
+                info += ' | ' + (d < 1000 ? Math.round(d) + 'M AWAY' : ((d / 1000).toFixed(1) + 'KM AWAY'));
+            }
+            document.getElementById('muc-info').innerText = info;
+            const actions = document.getElementById('muc-actions');
+            if (localStorage.getItem('pipboy-dev-mode') === 'true') {
+                actions.innerHTML = '<button class="theme-btn" style="flex:1; border-color:' + color + '; color:' + color + ';" onclick="extinguishZone(\'' + escapeHtml(zk) + '\')">[ EXTINGUISH ]</button>';
+            } else {
+                actions.innerHTML = '<div style="font-size:0.85rem; opacity:0.7; width:100%;">OVERSEER ZONE -- FIELD ACTIVE FOR ALL UNITS.</div>';
+            }
+            card.style.display = 'block';
         }
         function updateMapUserCard() {
             const card = document.getElementById('map-user-card');
@@ -4851,10 +4943,17 @@
                 } else {
                     info += ' | YOUR GPS OFFLINE';
                 }
+                // v0.51 LINK TELEMETRY: linked contacts broadcast hp/rads on their beacon.
+                // Vitals render for datacard-linked signals ONLY -- strangers stay anonymous.
+                if (contact && typeof b.hp === 'number' && typeof b.rads === 'number') {
+                    info += ' | HP ' + b.hp + ' | ' + b.rads + ' RADS';
+                }
             } else {
                 info = 'SIGNAL LOST';
             }
-            document.getElementById('muc-name').innerText = name;
+            const nameEl = document.getElementById('muc-name');
+            nameEl.innerText = name;
+            nameEl.style.color = ''; // v0.51: reset any zone-card colour
             document.getElementById('muc-info').innerText = info;
             const actions = document.getElementById('muc-actions');
             // v0.39: tapping YOUR OWN dot pins the same card -- status line only, no
