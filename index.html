@@ -54,7 +54,7 @@
         <div style="display: flex; flex-direction: column;">
             <div style="display: flex; align-items: baseline; gap: 10px;">
                 <span class="header-title" id="main-os-title">POX-BOY 3026</span>
-                <span style="font-size: 0.8rem; opacity: 0.5;">v0.49</span>
+                <span style="font-size: 0.8rem; opacity: 0.5;">v0.50</span>
             </div>
             <span id="pip-clock" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px;"></span>
             <span id="pip-batt" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px; display: none;"></span>
@@ -85,8 +85,14 @@
 
             <!-- STATUS -->
             <div id="sub-stat-status" class="sub-tab-content active">
-                <div class="vault-boy-container">
-                    [ VAULT BOY GRAPHIC HERE ]
+                <div class="vault-boy-container" id="vault-boy-container" onclick="openAvatarPicker()" style="cursor:pointer; position:relative;">
+                    <!-- v0.50: vault-boy graphic = a shot from YOUR databank (pipboy-avatarimg);
+                         status overlays (med ✚ / field ☢ / ≥250-rad static) drawn over it -->
+                    <div id="vb-img-wrap" style="position:relative; width:120px; height:120px; display:none;">
+                        <img id="vb-img" alt="" style="width:100%; height:100%; object-fit:cover; border:1px solid var(--pip-color); box-shadow:0 0 10px var(--pip-color-dim);">
+                        <div id="vb-fx" style="position:absolute; inset:0; pointer-events:none;"></div>
+                    </div>
+                    <span id="vb-default" style="opacity:0.6; text-align:center;">[ VAULT BOY GRAPHIC HERE ]<br><span style="font-size:0.9rem;">TAP TO SET FROM DATABANK</span></span>
                 </div>
                 <p id="stat-name-display" style="text-align: center; font-size: 1.4rem; font-weight: bold; margin-bottom: 5px;">NAME: UNKNOWN</p>
                 <p style="text-align: center; opacity: 0.8; margin-bottom: 15px;">LVL 1 - INITIATE</p>
@@ -690,7 +696,13 @@
             <h3>ADD NEW MAP MARKER</h3>
             <div class="form-group"><label>MARKER NAME</label><input type="text" id="wp-name" class="pip-input vk-target" readonly onclick="openVk('wp-name')" placeholder="e.g. VIP Bar"></div>
             <p style="font-size: 0.8rem; opacity: 0.7; margin-bottom: 15px;">Coordinates locked to map selection.</p>
-            
+
+            <!-- v0.50: OVERSEER zone placement — same long-press flow, true 15m fences drawn on every unit -->
+            <div id="wp-overseer-zones" style="display:none; margin-bottom:12px;">
+                <button class="pip-btn" onclick="dropHotZone('map')" style="border-color:#ff3333; color:#ff3333; margin-bottom:8px;">[☢ HOT ZONE HERE (15M)]</button>
+                <button class="pip-btn" onclick="dropMedZone('map')" style="border-color:#5fc98e; color:#5fc98e;">[✚ MED ZONE HERE (15M)]</button>
+            </div>
+
             <button class="pip-btn" onclick="saveNewWaypoint()">SAVE MARKER</button>
             <button class="pip-btn" onclick="closeModals()" style="margin-top: 15px; border-style: dashed;">CANCEL</button>
         </div>
@@ -827,7 +839,7 @@
     <div id="pre-boot-overlay" class="modal-overlay" style="z-index: 250; background: var(--pip-bg); flex-direction: column; display: none;">
         <!-- Version Tag & Dev Skip Button -->
         <div style="position: absolute; top: 10px; right: 10px; z-index: 260; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-            <span style="font-size: 0.8rem; opacity: 0.5;">v0.49</span>
+            <span style="font-size: 0.8rem; opacity: 0.5;">v0.50</span>
             <button class="pip-btn" onclick="devSkipToApp()" style="font-size: 0.7rem; padding: 2px 5px; border: none; color: #ff3333; opacity: 0.5;">[DEV: FAST BOOT]</button>
         </div>
         
@@ -849,7 +861,7 @@
 
     <!-- BOOT SPLASH SCREEN -->
     <div id="boot-splash" class="modal-overlay" style="z-index: 200; background: var(--pip-bg); flex-direction: column; display: flex;">
-        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.49</span>
+        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.50</span>
         <div class="crt" style="position: absolute; top:0; left:0; right:0; bottom:0; pointer-events: none; z-index: 201;"></div>
         <div style="z-index: 202; width: 100%; max-width: 600px; padding: 20px; text-align: left; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; justify-content: flex-end;" id="boot-text-container">
             <p id="boot-log-1" style="margin-bottom: 5px; display: none; font-size: 1rem;">ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM</p>

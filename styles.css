@@ -112,6 +112,15 @@
         .skills-list { column-count: 2; column-gap: 20px; }
         .vault-boy-container { display: flex; justify-content: center; align-items: center; height: 200px; border: 1px dashed var(--pip-color); margin-bottom: 15px; }
         .status-bars { margin-top: 20px; }
+
+        /* v0.50: vault-boy status overlays (pure CSS — zero shipped art)
+           fx-rads   = messy CRT-static border + jitter once rads >= 250
+           vb-tre    = drifting orange ☢ while bathed in a rad field
+           vb-cross  = soft green ✚ pulse while in a MED zone */
+        .vault-boy-container #vb-img-wrap.fx-rads img { animation: vbJitter 0.4s steps(2) infinite; border-color:#8fff8f; box-shadow:0 0 14px rgba(87,255,87,.8), inset 0 0 8px rgba(87,255,87,.5); }
+        @keyframes vbJitter { 0% { transform: translate(0,0); } 25% { transform: translate(1px,-1px); } 50% { transform: translate(-1px,1px); } 75% { transform: translate(1px,1px); } 100% { transform: translate(0,0); } }
+        .vb-tre, .vb-cross { position:absolute; font-size:22px; animation: vbFloat 2.4s ease-in-out infinite; text-shadow:0 0 6px currentColor; }
+        @keyframes vbFloat { 0%,100% { opacity:.35; transform: translateY(2px) scale(.9); } 50% { opacity:1; transform: translateY(-3px) scale(1.1); } }
         .stat-bar { display: flex; align-items: center; margin-bottom: 10px; }
         .stat-label { width: 40px; }
         .stat-fill-container { flex-grow: 1; height: 15px; border: 1px solid var(--pip-color); margin-left: 10px; }

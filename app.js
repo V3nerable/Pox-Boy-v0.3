@@ -752,6 +752,8 @@
             });
             document.getElementById('skills-list-display').innerHTML = skHTML;
 
+            renderVaultBoy(); // v0.50: STATUS graphic (databank pick) + overlays ride profile repaints
+
             let pkHTML = '';
             if (userProfile.perk) {
                 pkHTML += `
@@ -1918,15 +1920,18 @@
         
         let tempWpLat = null;
         let tempWpLng = null;
-        function openAddWaypointModal(lat, lng) { 
-            document.getElementById('wp-name').value = ''; 
+        function openAddWaypointModal(lat, lng) {
+            document.getElementById('wp-name').value = '';
             if (lat !== undefined && lng !== undefined) {
                 tempWpLat = lat; tempWpLng = lng;
             } else if (pipMap) {
                 const c = pipMap.getCenter();
                 tempWpLat = c.lat; tempWpLng = c.lng;
             }
-            document.getElementById('add-waypoint-modal').style.display = 'flex'; 
+            // v0.50: Overseer mode reveals zone-drops on the same placement flow
+            const oz = document.getElementById('wp-overseer-zones');
+            if (oz) oz.style.display = (localStorage.getItem('pipboy-dev-mode') === 'true') ? 'block' : 'none';
+            document.getElementById('add-waypoint-modal').style.display = 'flex';
         }
 
         function openRemoveWaypointModal() {
@@ -2367,23 +2372,32 @@
             });
         }
 
-        // v0.47: draw every Overseer HOT ZONE — red dashed diamond, permanent until
-        // EXTINGUISHED (no staleness prune: the Overseer owns the board)
+        // v0.50: draw every Overseer ZONE — real-radius L.circle fence (scales with zoom,
+        // matches ground truth 15m) + center glyph. HOT = red dashed ☢, MED = soft green ✚.
+        // Permanent until EXTINGUISHED (no staleness prune: the Overseer owns the board)
         function renderRadZones(data) {
             lastKnownRadZones = data || {};
             if (!radZonesGroup) return;
             radZonesGroup.clearLayers();
-            const hotIcon = L.divIcon({
-                className: 'custom-pip-marker',
-                html: '<div style="width: 14px; height: 14px; transform: rotate(45deg); border: 2px dashed #ff3333; background: transparent; box-shadow: 0 0 12px #ff3333;"></div>',
-                iconSize: [14, 14],
-                iconAnchor: [7, 7]
-            });
             Object.keys(lastKnownRadZones).forEach(zk => {
                 const z = lastKnownRadZones[zk];
                 if (!z || typeof z.lat !== 'number' || typeof z.lng !== 'number') return;
-                L.marker([z.lat, z.lng], {icon: hotIcon, zIndexOffset: 450})
-                    .bindTooltip('☢ ' + String(z.label || 'HOT ZONE').toUpperCase(), {
+                const med = z.kind === 'med';
+                const color = med ? '#5fc98e' : '#ff3333';
+                const glyph = med ? '✚' : '☢';
+                L.circle([z.lat, z.lng], {
+                    radius: (typeof z.radius === 'number' ? z.radius : 15),
+                    color: color, weight: 1.5, dashArray: '6 4',
+                    fillColor: color, fillOpacity: 0.07
+                }).addTo(radZonesGroup);
+                const zoneIcon = L.divIcon({
+                    className: 'custom-pip-marker',
+                    html: '<div style="width: 14px; height: 14px; transform: rotate(45deg); border: 2px dashed ' + color + '; background: transparent; box-shadow: 0 0 12px ' + color + ';"></div>',
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7]
+                });
+                L.marker([z.lat, z.lng], {icon: zoneIcon, zIndexOffset: 450})
+                    .bindTooltip(glyph + ' ' + String(z.label || (med ? 'MED ZONE' : 'HOT ZONE')).toUpperCase(), {
                         permanent: true,
                         direction: 'bottom',
                         className: 'pip-tooltip'
@@ -3551,6 +3565,7 @@
         let pariahMarks = {};       // uid -> {name, ts}: mirror of the Firebase pariahs/ node
         let radFieldActive = false; // hysteresis state: currently bathed in a pariah field
         let radFieldPariah = null;  // name of the source, for status purposes
+        let medShelterActive = false; // v0.50: inside a ✚ MED ZONE fence (recovery x5)
 
         function adjustRads(delta) {
             const before = userProfile.rads || 0;
@@ -3559,6 +3574,7 @@
             userProfile.rads = after;
             saveToStorage();
             renderProfile();
+            renderVaultBoyFx(); // v0.50: the ≥250 static border tracks the count live
         }
 
         function evalPariahField() {
@@ -3579,15 +3595,25 @@
                         }
                     });
                 }
-                // v0.47: static HOT ZONES irradiate everyone who steps in — pariah or not
+                // Zones: HOT irradiates everyone who steps in — pariahs included;
+                // v0.50: MED zones (kind 'med') never damage — they shelter, tracked separately
+                let nearestMed = null;
                 Object.keys(lastKnownRadZones).forEach(zk => {
                     const z = lastKnownRadZones[zk];
                     if (!z || typeof z.lat !== 'number' || typeof z.lng !== 'number') return;
                     const d = getDistance(myLastLat, myLastLng, z.lat, z.lng);
+                    if (z.kind === 'med') {
+                        if (nearestMed === null || d < nearestMed) nearestMed = d;
+                        return;
+                    }
                     if (!nearest || d < nearest.d) {
                         nearest = { d: d, name: ('☢ ' + (z.label || 'HOT ZONE')), kind: 'HOT ZONE' };
                     }
                 });
+                // v0.50: med fence shares the no-flicker rule — grab at 15m, release at 18m, silent
+                if (!medShelterActive && nearestMed !== null && nearestMed <= 15) medShelterActive = true;
+                else if (medShelterActive && (nearestMed === null || nearestMed > 18)) medShelterActive = false;
+                renderVaultBoyFx(); // overlays repaint on any engine evaluation
             }
             // Hysteresis: the field GRABS at 15m and RELEASES at 18m — no boundary flicker.
             // v0.48: entry/exit toasts DELETED per user — the geiger counter is the voice
@@ -3637,7 +3663,8 @@
         setInterval(radDamageTick, 5000);
         function radDecayTick() {
             evalPariahField();
-            if (!radFieldActive) adjustRads(-1); // v0.46: passive recovery, floor 0
+            // v0.50: ✚ MED ZONE shelter sheds 5/min; the open waste keeps its 1/min
+            if (!radFieldActive) adjustRads(medShelterActive ? -5 : -1);
         }
         setInterval(radDecayTick, 60000);
 
@@ -3705,31 +3732,54 @@
             }
             // v0.47: HOT ZONES — static radiation fields the Overseer drops at a spot.
             // No auto-expiry: they burn until EXTINGUISH (decree-style control).
-            html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:15px 0 10px; opacity:0.8;">HOT ZONES (STATIC)</h3>';
+            html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:15px 0 10px; opacity:0.8;">ZONES (STATIC, 15M)</h3>';
             const zKeys = Object.keys(lastKnownRadZones).sort((a, b) => ((lastKnownRadZones[b] || {}).ts || 0) - ((lastKnownRadZones[a] || {}).ts || 0));
             if (!zKeys.length) {
-                html += '<p style="opacity:0.5;">NO HOT ZONES DEPLOYED.</p>';
+                html += '<p style="opacity:0.5;">NO ZONES DEPLOYED.</p>';
             } else {
                 zKeys.forEach(zk => {
                     const z = lastKnownRadZones[zk] || {};
-                    html += '<div class="item-row"><div class="item-info"><div style="color:#ff3333;">☢ ' + escapeHtml(z.label || 'HOT ZONE') + '</div><div class="item-effects">DEPLOYED ' + timeOf(z.ts || Date.now()) + '</div></div><button class="theme-btn" onclick="extinguishZone(\'' + escapeHtml(zk) + '\')">[EXTINGUISH]</button></div>';
+                    const med = z.kind === 'med'; // v0.50
+                    html += '<div class="item-row"><div class="item-info"><div style="color:' + (med ? '#5fc98e' : '#ff3333') + ';">' + (med ? '✚' : '☢') + ' ' + escapeHtml(z.label || (med ? 'MED ZONE' : 'HOT ZONE')) + '</div><div class="item-effects">DEPLOYED ' + timeOf(z.ts || Date.now()) + '</div></div><button class="theme-btn" onclick="extinguishZone(\'' + escapeHtml(zk) + '\')">[EXTINGUISH]</button></div>';
                 });
             }
-            html += '<button class="pip-btn" style="border-color:#ff3333; color:#ff3333; margin-top:10px;" onclick="dropHotZone()">[☢ DROP HOT ZONE AT MY POSITION]</button>';
+            html += '<div style="display:flex; gap:8px; margin-top:10px;"><button class="pip-btn" style="border-color:#ff3333; color:#ff3333; flex:1; margin:0;" onclick="dropHotZone(\'me\')">[☢ HOT ZONE AT MY POSITION]</button><button class="pip-btn" style="border-color:#5fc98e; color:#5fc98e; flex:1; margin:0;" onclick="dropMedZone(\'me\')">[✚ MED ZONE AT MY POSITION]</button></div>';
+            html += '<p style="font-size:0.9rem; opacity:0.7; margin-top:8px; line-height:1.4;">LONG-PRESS THE MAP FOR PLACE-ANYWHERE DROPS (OVERSEER ONLY).</p>';
             return html;
         }
 
-        // v0.47: static-field counterparts to markPariah/cleansePariah
-        function dropHotZone() {
-            if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- HOT ZONE NOT TRANSMITTED.'); return; }
-            if (myLastLat === null || myLastLng === null) { showNotification('NO POSITION FIX -- ENABLE GPS TRACKING FROM THE MAP TAB.'); return; }
-            showCustomPrompt('IRRADIATE THIS SPOT? A ☢ HOT ZONE (15M FIELD) DROPS AT YOUR POSITION FOR ALL UNITS AND BURNS UNTIL EXTINGUISHED.', [
-                { label: 'DROP HOT ZONE', color: '#ff3333', action: () => {
-                    const key = 'z' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
-                    window.firebaseSet(window.firebaseRef(window.db, 'radzones/' + key), { label: 'HOT ZONE', lat: myLastLat, lng: myLastLng, ts: Date.now() })
-                        .then(() => showNotification('HOT ZONE DEPLOYED.'))
-                        .catch(() => showNotification('DEPLOY FAILED -- CHECK SIGNAL OR RULES.'));
-                }},
+        // v0.50: generic zone writer — both kinds, placed anywhere by map long-press
+        // ('map') or at the Overseer's boots ('me'). Fences are a REAL 15m radius:
+        // L.circle scales with zoom and matches ground truth.
+        function dropZone(kind, lat, lng) {
+            if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- ZONE NOT TRANSMITTED.'); return; }
+            const key = 'z' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
+            const zone = {
+                label: kind === 'med' ? 'MED ZONE' : 'HOT ZONE',
+                kind: kind, lat: lat, lng: lng, radius: 15, ts: Date.now()
+            };
+            window.firebaseSet(window.firebaseRef(window.db, 'radzones/' + key), zone)
+                .then(() => showNotification((kind === 'med' ? 'MED' : 'HOT') + ' ZONE DEPLOYED.'))
+                .catch(() => showNotification('DEPLOY FAILED -- CHECK SIGNAL OR RULES.'));
+        }
+
+        function dropHotZone(where) {
+            if (where === 'me' && (myLastLat === null || myLastLng === null)) { showNotification('NO POSITION FIX -- ENABLE GPS TRACKING FROM THE MAP TAB.'); return; }
+            const lat = where === 'map' ? tempWpLat : myLastLat;
+            const lng = where === 'map' ? tempWpLng : myLastLng;
+            showCustomPrompt('IRRADIATE THIS SPOT? A ☢ HOT ZONE (15M FIELD) DEPLOYS HERE FOR ALL UNITS AND BURNS UNTIL EXTINGUISHED.', [
+                { label: 'DROP HOT ZONE', color: '#ff3333', action: () => dropZone('hot', lat, lng) },
+                { label: 'CANCEL', color: 'var(--pip-color-dim)' }
+            ]);
+        }
+
+        // v0.50: the healing counterpart — −5 rads/min inside instead of the wasteland's 1
+        function dropMedZone(where) {
+            if (where === 'me' && (myLastLat === null || myLastLng === null)) { showNotification('NO POSITION FIX -- ENABLE GPS TRACKING FROM THE MAP TAB.'); return; }
+            const lat = where === 'map' ? tempWpLat : myLastLat;
+            const lng = where === 'map' ? tempWpLng : myLastLng;
+            showCustomPrompt('SANCTIFY THIS SPOT? A ✚ MED ZONE (15M) DEPLOYS HERE: ANYONE INSIDE SHEDS 5 RADS PER MINUTE UNTIL EXTINGUISHED.', [
+                { label: 'DROP MED ZONE', color: '#5fc98e', action: () => dropZone('med', lat, lng) },
                 { label: 'CANCEL', color: 'var(--pip-color-dim)' }
             ]);
         }
@@ -4212,6 +4262,79 @@
             document.getElementById('photo-pick-modal').style.display = 'flex';
         }
 
+        // ================= VAULT-BOY GRAPHIC + STATUS OVERLAYS (v0.50) =================
+        // The STATUS graphic is a 96px square crop of any shot in YOUR databank.
+        // Overlays are pure CSS, drawn from engine state: ☢ in a rad field, ✚ in a
+        // MED zone, messy static border at 250+ rads. Zero shipped art.
+        function openAvatarPicker() {
+            const hasImg = !!localStorage.getItem('pipboy-avatarimg');
+            const buttons = [{
+                label: 'SET IMAGE FROM DATABANK',
+                action: () => {
+                    if (!photoArchive.length) { showNotification('DATABANK EMPTY -- TAKE A PHOTO FIRST.'); return; }
+                    openAvatarSource();
+                }
+            }];
+            if (hasImg) buttons.push({ label: 'RESET TO DEFAULT', color: '#ff3333', action: () => {
+                localStorage.removeItem('pipboy-avatarimg');
+                renderVaultBoy();
+                showNotification('VAULT-BOY GRAPHIC RESET.');
+            }});
+            buttons.push({ label: 'CLOSE', color: 'var(--pip-color-dim)' });
+            showCustomPrompt('VAULT-BOY GRAPHIC — A SQUARE CROP OF ANY SHOT IN YOUR DATABANK.', buttons);
+        }
+
+        function openAvatarSource() {
+            photoPickMode = 'avatar';
+            document.getElementById('pp-title').innerText = 'VAULT-BOY GRAPHIC: PICK A SHOT';
+            let html = '<div class="photo-tile-grid">';
+            photoArchive.forEach((e, i) => { html += `<div class="photo-tile" onclick="pickPhotoForMail(${i})"><img src="${entryPip(e)}"></div>`; });
+            document.getElementById('pp-grid').innerHTML = html + '</div>';
+            document.getElementById('photo-pick-modal').style.display = 'flex';
+        }
+
+        function setAvatarFromEntry(entry) {
+            const img = new Image();
+            img.onload = () => {
+                try {
+                    const side = Math.min(img.width, img.height);
+                    const cv = document.createElement('canvas');
+                    cv.width = 96; cv.height = 96;
+                    cv.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, 96, 96);
+                    localStorage.setItem('pipboy-avatarimg', cv.toDataURL('image/jpeg', 0.7));
+                    renderVaultBoy();
+                    showNotification('VAULT-BOY GRAPHIC SET.');
+                } catch (e) { showNotification('IMAGE UNREADABLE -- PICK ANOTHER.'); }
+            };
+            img.onerror = () => showNotification('IMAGE UNREADABLE -- PICK ANOTHER.');
+            img.src = entryPip(entry);
+        }
+
+        function renderVaultBoy() {
+            const wrap = document.getElementById('vb-img-wrap');
+            const el = document.getElementById('vb-img');
+            const def = document.getElementById('vb-default');
+            if (!wrap || !el) return;
+            const img = localStorage.getItem('pipboy-avatarimg');
+            if (img) { el.src = img; wrap.style.display = 'block'; if (def) def.style.display = 'none'; }
+            else { wrap.style.display = 'none'; if (def) def.style.display = ''; }
+            renderVaultBoyFx();
+        }
+
+        function renderVaultBoyFx() {
+            const wrap = document.getElementById('vb-img-wrap');
+            const fx = document.getElementById('vb-fx');
+            if (!wrap || !fx || wrap.style.display === 'none') return;
+            wrap.classList.toggle('fx-rads', (userProfile.rads || 0) >= 250);
+            if (radFieldActive) {
+                fx.innerHTML = "<span class='vb-tre' style='left:6px;top:6px;color:#ff9a3c;'>☢</span><span class='vb-tre' style='right:6px;bottom:8px;color:#ff9a3c;animation-delay:.8s;'>☢</span><span class='vb-tre' style='right:10px;top:10px;color:#ff9a3c;animation-delay:1.4s;font-size:16px;'>☢</span>";
+            } else if (medShelterActive) {
+                fx.innerHTML = "<span class='vb-cross' style='left:6px;top:6px;color:#5fc98e;'>✚</span><span class='vb-cross' style='right:8px;bottom:10px;color:#5fc98e;animation-delay:.7s;'>✚</span><span class='vb-cross' style='right:12px;top:12px;color:#5fc98e;animation-delay:1.5s;font-size:16px;'>✚</span>";
+            } else {
+                fx.innerHTML = '';
+            }
+        }
+
         function closePhotoPick() {
             document.getElementById('photo-pick-modal').style.display = 'none';
             if (photoPickMode === 'attach') {
@@ -4231,6 +4354,12 @@
                 cmAttach.photo = entry;
                 refreshAttachUi();
                 document.getElementById('compose-msg-modal').style.display = 'flex';
+                return;
+            }
+            // v0.50 avatar-mode: square-crop into the STATUS graphic, no mail involved
+            if (photoPickMode === 'avatar') {
+                photoPickMode = 'send';
+                setAvatarFromEntry(entry);
                 return;
             }
             const c = contactByUid(photoPickTarget);
