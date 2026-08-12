@@ -738,6 +738,13 @@
             
             const radsFill = document.getElementById('status-rads-fill-bar');
             if (radsFill) radsFill.style.width = `${radPercent}%`;
+
+            // v0.52: the FOOTER bar (bottom-left HUD) was never wired -- its fills sat at
+            // 100%/0% since the dawn of the wasteland. Red now overtakes green there too.
+            const footHpFill = document.getElementById('hp-fill-bar');
+            if (footHpFill) footHpFill.style.width = `${(currentHp / userProfile.maxHp) * 100}%`;
+            const footRadsFill = document.getElementById('rads-fill-bar');
+            if (footRadsFill) footRadsFill.style.width = `${radPercent}%`;
             
             let spHTML = '';
             for (let key in userProfile.special) {
@@ -2287,6 +2294,9 @@
             sharedPinsGroup = L.layerGroup().addTo(pipMap); // v0.38 broadcast marker board
             radZonesGroup = L.layerGroup().addTo(pipMap);   // v0.47 Overseer hot zones
             renderMarkers();
+            // v0.52: if GPS auto-armed before the map ever initialised, our dot was
+            // deferred (no markersGroup to draw into) -- draw it now.
+            if (gpsWatchId !== null && myLastLat !== null && myLastLng !== null && !userMarker) ensureUserMarker(myLastLat, myLastLng);
             
             // Start listening to Firebase for other players
             if (window.db) {
@@ -2525,131 +2535,272 @@
             return R * c; 
         }
 
+        // ================= GPS ENGINE (v0.52 REBUILD) =================
+        // On-until-turned-off + resilient. Previously ONE transient satellite timeout
+        // tore the whole session down (user-reported: "my dot disappears quickly"): the
+        // error handler called toggleGPS(), which cleared the watch AND wiped the
+        // Firebase beacon -- while the rad engine kept running on the last fix. Now only
+        // a MANUAL tap or a revoked permission stops tracking; timeouts keep the watch,
+        // the dot, the beacon and the last fix alive. Screen-off geiger ticks preserved.
+        let lastFixAt = 0;            // last fresh satellite fix
+        let lastBeaconAt = 0;         // last wastelanders/ write (fix or keepalive stamp)
+        let gpsRestoredPending = false; // auto-armed at boot; toast once on first fix
+
         function toggleGPS() {
-            const btn = document.getElementById('gps-btn');
-            
-            // Check opt-in status
+            if (gpsWatchId !== null) {
+                // The ONLY manual off-switch: an explicit tap.
+                stopGpsWatch('manual');
+                return;
+            }
             if (localStorage.getItem('pipboy-opt-in') !== 'true') {
                 showNotification("GPS TRACKING ABORTED. YOU MUST OPT-IN TO SATELLITE TRACKING TO ENABLE THIS FEATURE.");
                 return;
             }
+            if (!navigator.geolocation) {
+                showNotification("GEOLOCATION IS NOT SUPPORTED BY YOUR DEVICE.");
+                return;
+            }
+            localStorage.setItem('pipboy-gps-tracking', '1'); // v0.52: on until turned off
+            startGpsWatch();
+        }
 
-            // Ensure user has a persistent UID for Firebase
+        function stopGpsWatch(reason) {
+            if (gpsWatchId !== null) {
+                navigator.geolocation.clearWatch(gpsWatchId);
+                gpsWatchId = null;
+            }
+            localStorage.setItem('pipboy-gps-tracking', '0');
+            const btn = document.getElementById('gps-btn');
+            if (btn) {
+                btn.innerText = "[ENABLE GPS TRACKING]";
+                btn.style.background = "transparent";
+                btn.style.color = "var(--pip-color)";
+            }
+            if (userMarker && markersGroup) {
+                markersGroup.removeLayer(userMarker);
+                userMarker = null;
+            }
+            const myUid = localStorage.getItem('pipboy-uid');
+            if (myUid) {
+                if (selectedBeaconUid === myUid) deselectBeacon();
+                // Wipe our tracking data from Firebase so we disappear from other maps
+                if (window.db) window.firebaseSet(window.firebaseRef(window.db, 'wastelanders/' + myUid), null);
+            }
+            // Deliberately KEPT: myLastLat/myLastLng -- the rad engine keeps evaluating
+            // your last known position even after the link dies.
+        }
+
+        function startGpsWatch() {
+            if (gpsWatchId !== null || !navigator.geolocation) return;
             let myUid = localStorage.getItem('pipboy-uid');
             if (!myUid) {
                 myUid = 'user_' + Date.now() + Math.floor(Math.random()*1000);
                 localStorage.setItem('pipboy-uid', myUid);
             }
-
-            if (gpsWatchId !== null) {
-                // Turn off GPS
-                navigator.geolocation.clearWatch(gpsWatchId);
-                gpsWatchId = null;
-                btn.innerText = "[ENABLE GPS TRACKING]";
-                btn.style.background = "transparent";
-                btn.style.color = "var(--pip-color)";
-                if (userMarker && markersGroup) {
-                    markersGroup.removeLayer(userMarker);
-                    userMarker = null;
-                }
-                if (selectedBeaconUid === myUid) deselectBeacon(); // v0.39: your dot is gone, so is its card
-                // Wipe our tracking data from Firebase so we disappear from other maps
-                if (window.db) {
-                    window.firebaseSet(window.firebaseRef(window.db, 'wastelanders/' + myUid), null);
-                }
-                return;
-            }
-
-            // Turn on GPS
-            if (!navigator.geolocation) {
-                showNotification("GEOLOCATION IS NOT SUPPORTED BY YOUR DEVICE.");
-                return;
-            }
-
-            btn.innerText = "[LOCATING SATELLITE...]";
-            
-            // v0.39: plain pip dot -- no pulse, and the permanent YOU ARE HERE banner is
-            // GONE (it sat above every close-range beacon and ate their taps).
-            const userIcon = L.divIcon({
-                className: 'custom-pip-marker',
-                html: `<div style="background-color: var(--pip-color); width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--pip-bg); box-shadow: 0 0 10px var(--pip-color);"></div>`,
-                iconSize: [14, 14],
-                iconAnchor: [7, 7]
-            });
-
+            const btn = document.getElementById('gps-btn');
+            if (btn) btn.innerText = "[LOCATING SATELLITE...]";
+            lastFixAt = Date.now();
             gpsWatchId = navigator.geolocation.watchPosition(
-                (position) => {
-                    // The GPS permission popup force-exited fullscreen; try to slide back in
-                    restoreFullscreenIfDesired();
-
-                    const lat = position.coords.latitude;
-                    const lng = position.coords.longitude;
-                    myLastLat = lat; myLastLng = lng; // feeds map wastelander-card distance readout
-                    evalPariahField(); // v0.46: snappy field entry/exit on every fresh fix (the 5s/60s ticks backstop this)
-                    
-                    btn.innerText = "[DISABLE GPS TRACKING]";
-                    btn.style.background = "var(--pip-color-dim)";
-                    btn.style.color = "var(--pip-bg)";
-
-                    if (!userMarker) {
-                        // v0.39: z 800 = UNDER other beacons (z 900) so a wastelander
-                        // standing next to you wins the tap; tapping YOUR dot pins your
-                        // own card with the same sticky-select behavior as theirs.
-                        userMarker = L.marker([lat, lng], {icon: userIcon, zIndexOffset: 800})
-                            .addTo(markersGroup);
-                        userMarker.on('click', (e) => {
-                            L.DomEvent.stopPropagation(e.originalEvent);
-                            selectBeacon(myUid);
-                        });
-                        pipMap.setView([lat, lng], 16); 
-                    } else {
-                        userMarker.setLatLng([lat, lng]);
-                    }
-                    // Push live location to Firebase!
-                    if (window.db) {
-                        const myRef = window.firebaseRef(window.db, 'wastelanders/' + myUid);
-                        // v0.51 LINK TELEMETRY: hp/rads ride the beacon as OPTIONAL numerics
-                        // (same floor formula as the HP bar) so linked contacts get medic intel.
-                        // Pre-v0.51 units omit them -- rules validate them optional, 0..1000.
-                        const myRads = userProfile.rads || 0;
-                        window.firebaseSet(myRef, {
-                            name: (userProfile.name || 'UNKNOWN').slice(0, 24), // rules cap name at 24 chars
-                            lat: lat,
-                            lng: lng,
-                            timestamp: Date.now(),
-                            hp: Math.max(0, userProfile.maxHp - Math.floor((myRads / 1000) * userProfile.maxHp)),
-                            rads: myRads
-                        });
-                        // Removed auto-delete on disconnect. The last known location will stay forever!
-                    }
-
-                    // --- GEOFENCING LOGIC (DISCOVER WAYPOINTS) ---
-                    let changed = false;
-                    waypoints.forEach(wp => {
-                        if (!wp.discovered) {
-                            const dist = getDistance(lat, lng, wp.lat, wp.lng);
-                            // If user is within 30 meters of the waypoint
-                            if (dist < 30) {
-                                wp.discovered = true;
-                                changed = true;
-                                showNotification("LOCATION DISCOVERED: " + wp.name);
-                            }
-                        }
-                    });
-
-                    if (changed) {
-                        saveToStorage();
-                        // Also update the "LOCATIONS DISCOVERED" stat in the DATA tab!
-                        renderStatsTab();
-                    }
-                },
-                (error) => {
-                    showNotification("SATELLITE LINK FAILED. PLEASE CHECK DEVICE SETTINGS.");
-                    toggleGPS(); // Reset button
-                    restoreFullscreenIfDesired();
-                },
-                { enableHighAccuracy: true, maximumAge: 10000, timeout: 5000 }
+                gpsOnFix,
+                gpsOnError,
+                // v0.52: breathing room -- the old 10000/5000 settings invited the kill
+                { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
             );
+        }
+
+        // v0.52: silent re-arm after app restarts (location permission persists on the
+        // device; no fullscreen grab -- just the watch). Booted after initComms below.
+        function maybeAutoGps() {
+            if (gpsWatchId !== null) return;
+            if (localStorage.getItem('pipboy-gps-tracking') !== '1') return;
+            if (localStorage.getItem('pipboy-opt-in') !== 'true') return;
+            if (!navigator.geolocation) return;
+            gpsRestoredPending = true;
+            startGpsWatch();
+        }
+
+        function gpsOnFix(position) {
+            // The GPS permission popup force-exited fullscreen; try to slide back in
+            restoreFullscreenIfDesired();
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            myLastLat = lat; myLastLng = lng; // feeds map wastelander-card distance readout
+            lastFixAt = Date.now();
+            evalPariahField(); // field entry/exit on every fresh fix (ticks backstop)
+
+            const btn = document.getElementById('gps-btn');
+            if (btn) {
+                btn.innerText = "[DISABLE GPS TRACKING]";
+                btn.style.background = "var(--pip-color-dim)";
+                btn.style.color = "var(--pip-bg)";
+            }
+            if (gpsRestoredPending) {
+                gpsRestoredPending = false;
+                showNotification("SATELLITE LINK RESTORED.");
+            }
+
+            if (markersGroup) ensureUserMarker(lat, lng);
+
+            // Push live location to Firebase (scrambler may swap in the decoy site)
+            pushMyBeacon(lat, lng);
+
+            // --- GEOFENCING LOGIC (DISCOVER WAYPOINTS) ---
+            let changed = false;
+            waypoints.forEach(wp => {
+                if (!wp.discovered) {
+                    const dist = getDistance(lat, lng, wp.lat, wp.lng);
+                    if (dist < 30) {
+                        wp.discovered = true;
+                        changed = true;
+                        showNotification("LOCATION DISCOVERED: " + wp.name);
+                    }
+                }
+            });
+            if (changed) {
+                saveToStorage();
+                renderStatsTab();
+            }
+        }
+
+        function gpsOnError(error) {
+            restoreFullscreenIfDesired();
+            // PERMISSION_DENIED is the only fatal error: the user revoked location access.
+            if (error && error.code === 1) {
+                stopGpsWatch('denied');
+                showNotification("LOCATION PERMISSION DENIED -- GPS TRACKING DISABLED.");
+            }
+            // POSITION_UNAVAILABLE (2) / TIMEOUT (3): transient. Watch, dot, beacon and
+            // last fix all stay alive; housekeeping keeps the beacon freshly stamped.
+        }
+
+        // v0.39 marker behaviour preserved (plain pip dot, z 800 under other beacons,
+        // clickable self-card). Extracted so the MAP tab can restore the dot late when
+        // the watch was auto-armed before the map ever initialised.
+        function ensureUserMarker(lat, lng) {
+            if (!markersGroup) return;
+            if (!userMarker) {
+                const userIcon = L.divIcon({
+                    className: 'custom-pip-marker',
+                    html: `<div style="background-color: var(--pip-color); width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--pip-bg); box-shadow: 0 0 10px var(--pip-color);"></div>`,
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7]
+                });
+                userMarker = L.marker([lat, lng], {icon: userIcon, zIndexOffset: 800})
+                    .addTo(markersGroup);
+                userMarker.on('click', (e) => {
+                    L.DomEvent.stopPropagation(e.originalEvent);
+                    selectBeacon(localStorage.getItem('pipboy-uid'));
+                });
+                if (pipMap) pipMap.setView([lat, lng], 16);
+            } else {
+                userMarker.setLatLng([lat, lng]);
+            }
+        }
+
+        // Single beacon writer for fresh fixes AND keepalive stamps. v0.51 telemetry
+        // (hp/rads optional numerics) always rides; v0.52 scrambler may substitute the
+        // decoy site for the coordinates other units receive.
+        function pushMyBeacon(lat, lng) {
+            if (!window.db) return;
+            const myUid = localStorage.getItem('pipboy-uid');
+            if (!myUid) return;
+            let blat = lat, blng = lng;
+            if (scramblerOn()) {
+                const d = decoyCoords();
+                blat = d.lat;
+                blng = d.lng;
+            }
+            const myRads = userProfile.rads || 0;
+            window.firebaseSet(window.firebaseRef(window.db, 'wastelanders/' + myUid), {
+                name: (userProfile.name || 'UNKNOWN').slice(0, 24), // rules cap name at 24 chars
+                lat: blat,
+                lng: blng,
+                timestamp: Date.now(),
+                hp: Math.max(0, userProfile.maxHp - Math.floor((myRads / 1000) * userProfile.maxHp)),
+                rads: myRads
+            });
+            lastBeaconAt = Date.now();
+        }
+
+        // Health + keepalive, every 15s: a beacon older than ~5min renders LKL (and stops
+        // irradiating its owner's pariah pursuers), so re-stamp every 30s even standing
+        // stock-still. 90s without any fix earns a quiet UNSTABLE label, never a kill.
+        setInterval(() => {
+            if (gpsWatchId === null) return;
+            const now = Date.now();
+            if (myLastLat !== null && myLastLng !== null && (now - lastBeaconAt) >= 30000) {
+                pushMyBeacon(myLastLat, myLastLng);
+            }
+            if (now - lastFixAt > 90000) {
+                const btn = document.getElementById('gps-btn');
+                if (btn && btn.innerText.indexOf('UNSTABLE') === -1) btn.innerText = "[GPS UNSTABLE -- HOLDING LAST FIX]";
+            }
+        }, 15000);
+
+        // ================= BEACON SCRAMBLER (v0.52) =================
+        // Privacy decoy for pre-event testing: YOUR unit keeps its real fix (rads, zones,
+        // healing, distances stay truthful) -- only what other Pip-Boys receive is faked.
+        const DEFAULT_DECOY = { lat: -31.56346462162551, lng: 117.7976226150244 }; // event site (user-supplied)
+        function decoyBase() {
+            try {
+                const raw = JSON.parse(localStorage.getItem('pipboy-decoy') || 'null');
+                if (raw && typeof raw.lat === 'number' && typeof raw.lng === 'number') return raw;
+            } catch (e) {}
+            return DEFAULT_DECOY;
+        }
+        function scramblerOn() { return localStorage.getItem('pipboy-scrambler') === '1'; }
+        function decoyCoords() {
+            // Stable per-unit scatter seeded from the UID: N scrambled testers never share
+            // one pixel, every client renders the identical layout, dots never wander.
+            const base = decoyBase();
+            const uid = localStorage.getItem('pipboy-uid') || 'anon';
+            let h = 0;
+            for (let i = 0; i < uid.length; i++) h = (h * 31 + uid.charCodeAt(i)) | 0;
+            const ang = (Math.abs(h) % 360) * Math.PI / 180;
+            const r = 5 + (Math.abs(h >> 8) % 4) * 5; // 5..20 m
+            return {
+                lat: base.lat + (r * Math.cos(ang)) / 111320,
+                lng: base.lng + (r * Math.sin(ang)) / (111320 * Math.cos(base.lat * Math.PI / 180))
+            };
+        }
+        function toggleScrambler() {
+            const on = !scramblerOn();
+            localStorage.setItem('pipboy-scrambler', on ? '1' : '0');
+            syncScramblerBtn();
+            showNotification(on
+                ? "BEACON SCRAMBLER ON -- OTHER UNITS SEE YOUR DOT AT THE DECOY SITE. LONG-PRESS THE MAP > SET DECOY SITE TO MOVE IT."
+                : "BEACON SCRAMBLER OFF -- BROADCASTING YOUR REAL POSITION AGAIN.");
+            // Re-stamp the beacon immediately with the new truth
+            if (gpsWatchId !== null && myLastLat !== null && myLastLng !== null) pushMyBeacon(myLastLat, myLastLng);
+            updateMapUserCard(); // refreshes the SCRAMBLED tell if your own card is pinned
+        }
+        function syncScramblerBtn() {
+            const b = document.getElementById('options-scrambler-btn');
+            if (b) b.innerText = scramblerOn() ? '[BEACON SCRAMBLER: ON]' : '[BEACON SCRAMBLER: OFF]';
+        }
+        (function() { syncScramblerBtn(); })();
+        // Long-press map > [SET DECOY SITE HERE] (tempWp* are locked by the waypoint modal)
+        function setDecoySite() {
+            if (typeof tempWpLat !== 'number' || typeof tempWpLng !== 'number') return;
+            localStorage.setItem('pipboy-decoy', JSON.stringify({ lat: tempWpLat, lng: tempWpLng }));
+            closeModals();
+            showNotification(scramblerOn()
+                ? "DECOY SITE SET -- SCRAMBLED DOT MOVED."
+                : "DECOY SITE SAVED -- ARM THE SCRAMBLER FROM DATA > OPTIONS TO USE IT.");
+            if (scramblerOn() && gpsWatchId !== null && myLastLat !== null && myLastLng !== null) pushMyBeacon(myLastLat, myLastLng);
+        }
+
+        // ================= SHARED VITALS BAR (v0.52) =================
+        // The "overtaking" bar: green = HP remaining, red = the rads-eaten slice growing
+        // in from the right (1000 rads eats the whole bar). Beacon telemetry for linked
+        // contacts; live from userProfile on your own datacard / the footer HUD.
+        function vitalsBarHtml(hp, rads) {
+            const radPct = Math.max(0, Math.min(100, (rads || 0) / 10));
+            const hpPct = Math.max(0, 100 - radPct);
+            return '<div style="width:100%; height:9px; border:1px solid var(--pip-color); display:flex; background:var(--pip-bg); margin-top:6px;">' +
+                '<div style="height:100%; background-color:var(--pip-color); width:' + hpPct + '%; box-shadow:0 0 5px var(--pip-color);"></div>' +
+                '<div style="height:100%; background-color:#ff3333; width:' + radPct + '%; box-shadow:0 0 5px #ff3333;"></div>' +
+                '</div><div style="font-size:0.75rem; opacity:0.8; margin-top:2px;">HP ' + hp + ' | <span style="color:#ff3333;">' + (rads || 0) + ' RADS</span></div>';
         }
 
         function renderStatsTab() {
@@ -3366,6 +3517,12 @@
         // --- MY DATACARD: broadcast identity QR (plain-text, not JSON) ---
         function openDatacard() {
             document.getElementById('datacard-name').innerText = userProfile.name || 'UNKNOWN';
+            // v0.52: your own card shows your LIVE vitals bar (no beacon staleness here)
+            const dv = document.getElementById('dc-vitals');
+            if (dv) {
+                const r = userProfile.rads || 0;
+                dv.innerHTML = vitalsBarHtml(Math.max(0, userProfile.maxHp - Math.floor((r / 1000) * userProfile.maxHp)), r);
+            }
             const canvas = document.getElementById('datacard-qr-canvas');
             canvas.innerHTML = '';
             new QRCode(canvas, {
@@ -4218,6 +4375,17 @@
                 presence = m < 5 ? 'LIVE SIGNAL' : ('LAST SEEN ' + m + 'M AGO');
             }
             document.getElementById('contact-meta').innerText = 'MET: ' + new Date(c.metAt).toLocaleDateString() + ' | ' + presence;
+            // v0.52: vitals bar when this contact is broadcasting telemetry (v0.51+ units)
+            const cv = document.getElementById('contact-vitals');
+            if (cv) {
+                if (b && typeof b.hp === 'number' && typeof b.rads === 'number') {
+                    cv.innerHTML = vitalsBarHtml(b.hp, b.rads);
+                    cv.style.display = 'block';
+                } else {
+                    cv.innerHTML = '';
+                    cv.style.display = 'none';
+                }
+            }
             document.getElementById('contact-modal').style.display = 'flex';
         }
 
@@ -4917,6 +5085,8 @@
                 info += ' | ' + (d < 1000 ? Math.round(d) + 'M AWAY' : ((d / 1000).toFixed(1) + 'KM AWAY'));
             }
             document.getElementById('muc-info').innerText = info;
+            const vit = document.getElementById('muc-vitals'); // v0.52: zones carry no vitals -- clear any beacon bar
+            if (vit) { vit.innerHTML = ''; vit.style.display = 'none'; }
             const actions = document.getElementById('muc-actions');
             if (localStorage.getItem('pipboy-dev-mode') === 'true') {
                 actions.innerHTML = '<button class="theme-btn" style="flex:1; border-color:' + color + '; color:' + color + ';" onclick="extinguishZone(\'' + escapeHtml(zk) + '\')">[ EXTINGUISH ]</button>';
@@ -4959,7 +5129,8 @@
             // v0.39: tapping YOUR OWN dot pins the same card -- status line only, no
             // self-addressed comms buttons (datacard/link requests to yourself are nonsense)
             if (uid === myMailUid) {
-                actions.innerHTML = '<div style="font-size:0.85rem; opacity:0.7; width:100%;">THIS IS YOUR LIVE SIGNAL -- OTHER WASTELANDERS SEE THIS DOT.</div>';
+                actions.innerHTML = '<div style="font-size:0.85rem; opacity:0.7; width:100%;">THIS IS YOUR LIVE SIGNAL -- ' +
+                    (scramblerOn() ? 'SCRAMBLED: EVERYONE SEES YOUR DECOY-SITE DOT.' : 'OTHER WASTELANDERS SEE THIS DOT.') + '</div>';
             } else if (contact) {
                 actions.innerHTML =
                     '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'msg\', \'' + uid + '\')">[ MSG ]</button>' +
@@ -4972,6 +5143,17 @@
                     '<button class="theme-btn" style="flex:1;" onclick="sendDatacardToUid(\'' + uid + '\')">[ SEND DATACARD ]</button>' +
                     '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'msg\', \'' + uid + '\')">[ MSG ]</button>' +
                     '<div style="font-size:0.85rem; opacity:0.7; width:100%;">UNLINKED SIGNAL -- MSG ARRIVES UNVERIFIED THEIR END. SCAN THEIR DATACARD FOR CONTRACTS/ITEMS.</div>';
+            }
+            // v0.52: the overtaking vitals bar rides the card for linked telemetry units
+            const vit = document.getElementById('muc-vitals');
+            if (vit) {
+                if (contact && b && typeof b.hp === 'number' && typeof b.rads === 'number') {
+                    vit.innerHTML = vitalsBarHtml(b.hp, b.rads);
+                    vit.style.display = 'block';
+                } else {
+                    vit.innerHTML = '';
+                    vit.style.display = 'none';
+                }
             }
             card.style.display = 'block';
         }
@@ -5009,6 +5191,7 @@
         setInterval(() => { flushOutbox(); refreshOutboxStatuses(); }, 20000);
         renderMailBadge();
         initComms();
+        maybeAutoGps(); // v0.52: GPS is on-until-turned-off -- silently re-arm if it was left on
 
         // ==================== PWA INSTALL PIPELINE (v0.32) ====================
         // Root cause of "install did nothing on Chrome": the WebAPK minting pipeline is
