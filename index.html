@@ -54,7 +54,7 @@
         <div style="display: flex; flex-direction: column;">
             <div style="display: flex; align-items: baseline; gap: 10px;">
                 <span class="header-title" id="main-os-title">POX-BOY 3026</span>
-                <span style="font-size: 0.8rem; opacity: 0.5;">v0.52</span>
+                <span style="font-size: 0.8rem; opacity: 0.5;">v0.53</span>
             </div>
             <span id="pip-clock" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px;"></span>
             <span id="pip-batt" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px; display: none;"></span>
@@ -66,7 +66,7 @@
     <!-- MAIN NAVIGATION -->
     <div class="nav-tabs">
         <div class="nav-item active" onclick="switchMainTab('stat')">STAT</div>
-        <div class="nav-item" onclick="switchMainTab('inv')">INV</div>
+        <div class="nav-item" id="mail-navitem" onclick="switchMainTab('mail')">MAIL</div>
         <div class="nav-item" onclick="switchMainTab('data')">DATA</div>
         <div class="nav-item" onclick="switchMainTab('map')">MAP</div>
         <div class="nav-item" onclick="switchMainTab('cam')">CAM</div>
@@ -81,6 +81,7 @@
                 <div class="sub-nav-item" onclick="switchSubTab('stat', 'special')">S.P.E.C.I.A.L.</div>
                 <div class="sub-nav-item" onclick="switchSubTab('stat', 'skills')">SKILLS</div>
                 <div class="sub-nav-item" onclick="switchSubTab('stat', 'perks')">PERKS</div>
+                <div class="sub-nav-item" onclick="switchSubTab('stat', 'stats')">STATS</div>
             </div>
 
             <!-- STATUS -->
@@ -142,19 +143,29 @@
                     <!-- Populated by JS -->
                 </div>
             </div>
+
+            <!-- STATS (v0.53: relocated from DATA; hosts OVERSEER pariah/zone panels) -->
+            <div id="sub-stat-stats" class="sub-tab-content">
+                <div id="stats-general">
+                    <h2>GENERAL STATS</h2><br>
+                    <p>LOCATIONS DISCOVERED: 1</p>
+                    <p>DAYS PASSED: 0</p>
+                    <p>NUKA-COLAS DRUNK: 0</p>
+                </div>
+                <!-- v0.46: OVERSEER PARIAH CONTROL — rendered by renderStatsTab, dev-mode only -->
+                <div id="overseer-pariahs" style="display:none; margin-top:25px;"></div>
+            </div>
         </div>
 
-        <!-- ================= INV TAB ================= -->
-        <div id="tab-inv" class="tab-content">
-            <button class="theme-btn" onclick="startQRScanner()" style="width: 100%; border-style: dashed; font-size: 1.1rem; margin-bottom: 15px; padding: 10px;">[SCAN TRANSFER]</button>
-            <div class="sub-nav" id="inv-sub-nav">
-                <div class="sub-nav-item active" onclick="switchSubTab('inv', 'weapons')">WEAPONS</div>
-                <div class="sub-nav-item" onclick="switchSubTab('inv', 'apparel')">APPAREL</div>
-                <div class="sub-nav-item" onclick="switchSubTab('inv', 'aid')">AID</div>
-                <div class="sub-nav-item" onclick="switchSubTab('inv', 'misc')">MISC</div>
-                <div class="sub-nav-item" onclick="switchSubTab('inv', 'ammo')">AMMO</div>
+        <!-- ================= MAIL TAB (v0.53: promoted from DATA sub-tab; INV retired) ================= -->
+        <div id="tab-mail" class="tab-content">
+            <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                <button class="theme-btn" onclick="startQRScanner()" style="flex: 1; border-style: dashed; font-size: 1.1rem; padding: 10px;">[SCAN TRANSFER]</button>
+                <button class="theme-btn" onclick="openRecipientPicker()" style="flex: 1; border-style: dashed; font-size: 1.1rem; padding: 10px;">[✉ SEND NEW MESSAGE]</button>
             </div>
-            <div id="inv-container"></div>
+            <div id="mail-container">
+                <!-- Populated by JS -->
+            </div>
         </div>
 
         <!-- ================= DATA TAB ================= -->
@@ -167,9 +178,7 @@
                 <div class="sub-nav-item active" onclick="switchSubTab('data', 'quests')">QUESTS</div>
                 <div class="sub-nav-item" onclick="switchSubTab('data', 'contracts')">CONTRACTS</div>
                 <div class="sub-nav-item" onclick="switchSubTab('data', 'wastelanders')">WASTELANDERS</div>
-                <div class="sub-nav-item" id="data-mail-navitem" onclick="switchSubTab('data', 'mail')">MAIL</div>
                 <div class="sub-nav-item" onclick="switchSubTab('data', 'factions')">FACTIONS</div>
-                <div class="sub-nav-item" onclick="switchSubTab('data', 'stats')">STATS</div>
                 <div class="sub-nav-item" onclick="switchSubTab('data', 'options')">OPTIONS</div>
             </div>
 
@@ -219,14 +228,6 @@
                 </div>
             </div>
 
-            <!-- MAIL (flat feed: action items pinned, then one chronological stream) -->
-            <div id="sub-data-mail" class="sub-tab-content">
-                <!-- v0.38: one-tap new message -- lists all linked contacts as recipients -->
-                <button class="pip-btn" onclick="openRecipientPicker()" style="border-style: dashed; margin-bottom: 15px;">[✉ SEND NEW MESSAGE]</button>
-                <div id="mail-container">
-                    <!-- Populated by JS -->
-                </div>
-            </div>
             
             <!-- FACTIONS -->
             <div id="sub-data-factions" class="sub-tab-content">
@@ -236,17 +237,7 @@
                 </div>
             </div>
 
-            <!-- DATA STATS -->
-            <div id="sub-data-stats" class="sub-tab-content">
-                <div id="stats-general">
-                    <h2>GENERAL STATS</h2><br>
-                    <p>LOCATIONS DISCOVERED: 1</p>
-                    <p>DAYS PASSED: 0</p>
-                    <p>NUKA-COLAS DRUNK: 0</p>
-                </div>
-                <!-- v0.46: OVERSEER PARIAH CONTROL — rendered by renderStatsTab, dev-mode only -->
-                <div id="overseer-pariahs" style="display:none; margin-top:25px;"></div>
-            </div>
+
         </div>
 
         <!-- ================= MAP TAB ================= -->
@@ -339,23 +330,34 @@
         <!-- ================= RADIO TAB ================= -->
         <div id="tab-radio" class="tab-content">
             <h2>RADIO STATIONS</h2><br>
-            <p style="font-size: 0.9rem; opacity: 0.8; margin-bottom: 15px;">
-                Note: To use real audio, place .mp3 files in the folder and link them below.
-            </p>
-            
-            <!-- Note the second parameter is the MP3 file path -->
-            <div class="radio-station" onclick="playRadio(this, 'diamond.mp3')">
+            <div id="radio-now" style="border: 1px dashed var(--pip-color-dim); padding: 8px; margin-bottom: 12px; font-size: 1rem; color: #ffb642; text-shadow: 0 0 5px #ffb642; min-height: 2.2rem;">RADIO OFF</div>
+
+            <!-- v0.53: three dials, fed by radio-stations.json; each loops forever. -->
+            <div class="radio-station" id="rs-gnr" onclick="radioStationTap('gnr')">
                 <span class="radio-indicator">▶</span>
-                <span>DIAMOND CITY RADIO</span>
+                <span>CAPITAL WASTELAND RADIO</span>
+                <span class="rs-state" style="margin-left: auto; font-size: 0.75rem; opacity: 0.7;"></span>
             </div>
-            <div class="radio-station" onclick="playRadio(this, 'galaxy.mp3')">
+            <div class="radio-station" id="rs-dcr" onclick="radioStationTap('dcr')">
                 <span class="radio-indicator">▶</span>
-                <span>GALAXY NEWS RADIO</span>
+                <span>COMMONWEALTH RADIO</span>
+                <span class="rs-state" style="margin-left: auto; font-size: 0.75rem; opacity: 0.7;"></span>
             </div>
-            <div class="radio-station playing" onclick="playRadio(this, null)">
+            <div class="radio-station" id="rs-appa" onclick="radioStationTap('appa')">
                 <span class="radio-indicator">▶</span>
-                <span>RADIO OFF</span>
+                <span>APPALACHIA RADIO</span>
+                <span class="rs-state" style="margin-left: auto; font-size: 0.75rem; opacity: 0.7;"></span>
             </div>
+
+            <div style="display: flex; gap: 10px; margin: 12px 0;">
+                <button class="pip-btn" onclick="radioNextUi()" style="flex: 1; border-style: dashed;">[▶▶ NEXT TRANSMISSION]</button>
+                <button class="pip-btn" onclick="radioStop()" style="flex: 1; border-style: dashed;">[◼ RADIO OFF]</button>
+            </div>
+
+            <!-- v0.53: pack downloader — confirm popup quotes true bytes from the manifest -->
+            <button class="pip-btn" id="radio-dl-btn" onclick="radioDownloadMenu()" style="width: 100%; border-style: dashed; border-color: #ffb642; color: #ffb642; margin-top: 10px;">[⇩ DOWNLOAD RADIO CONTENT]</button>
+            <div id="radio-dl-status" style="font-size: 0.85rem; opacity: 0.85; margin-top: 8px; min-height: 1.1rem;"></div>
+            <p style="font-size: 0.8rem; opacity: 0.6; margin-top: 10px; line-height: 1.35;">DOWNLOAD ON WIFI BEFORE THE EVENT — THE PACK CACHES ON THIS UNIT AND PLAYS OFFLINE FOREVER. UNDOWNLOADED STATIONS STREAM WHILE ONLINE ONLY. STATIONS LOOP INDEPENDENTLY ON EVERY UNIT.</p>
         </div>
     </div>
 
@@ -374,7 +376,6 @@
         </div>
 
         <div class="footer-action-container" style="flex-grow: 2; margin: 0 15px;">
-            <button class="theme-btn" id="add-item-btn" onclick="openAddModal()" style="display: none;">+ ADD ITEM</button>
             <button class="theme-btn" id="add-quest-btn" onclick="openAddQuestModal()" style="display: none;">+ ADD QUEST</button>
             <div id="faction-controls" style="display: none; justify-content: center; gap: 10px;">
                 <button class="theme-btn" onclick="openFactionAuth('ADD')">+ ADD FACTION</button>
@@ -418,7 +419,6 @@
             <div id="contact-vitals" style="display: none; margin: -8px 0 16px;"></div>
             <button class="pip-btn" onclick="composeTo('msg')" style="border-style: dashed;">[ MESSAGE ]</button>
             <button class="pip-btn" onclick="composeTo('quest')" style="border-style: dashed;">[ SEND QUEST ]</button>
-            <button class="pip-btn" onclick="composeTo('item')" style="border-style: dashed;">[ SEND ITEM ]</button>
             <button class="pip-btn" onclick="openPhotoPicker(contactUidTarget)" style="border-style: dashed; border-color: #42b6ff; color: #42b6ff;">[ SEND PHOTO ]</button>
             <button class="pip-btn" onclick="sendDatacardViaMail()" style="border-style: dashed; border-color: #42b6ff; color: #42b6ff;">[ SEND MY DATACARD ]</button>
             <div style="display: flex; gap: 10px; margin-top: 15px;">
@@ -456,7 +456,6 @@
                  from the LOADOUT can ride the letter -->
             <div style="display:flex; gap:8px; margin-bottom:10px;">
                 <button class="pip-btn" id="cm-photo-btn" onclick="attachComposerPhoto()" style="flex:1; border-style:dashed; font-size:1rem; margin:0;">[+ PHOTO]</button>
-                <button class="pip-btn" id="cm-item-btn" onclick="attachComposerItem()" style="flex:1; border-style:dashed; font-size:1rem; margin:0;">[+ ITEM]</button>
             </div>
             <div id="cm-attach-note" style="display:none; font-size:1rem; opacity:0.8; margin-bottom:8px;"></div>
             <button class="pip-btn" onclick="transmitMsg()">[ SEND TRANSMISSION ]</button>
@@ -847,7 +846,7 @@
     <div id="pre-boot-overlay" class="modal-overlay" style="z-index: 250; background: var(--pip-bg); flex-direction: column; display: none;">
         <!-- Version Tag & Dev Skip Button -->
         <div style="position: absolute; top: 10px; right: 10px; z-index: 260; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-            <span style="font-size: 0.8rem; opacity: 0.5;">v0.52</span>
+            <span style="font-size: 0.8rem; opacity: 0.5;">v0.53</span>
             <button class="pip-btn" onclick="devSkipToApp()" style="font-size: 0.7rem; padding: 2px 5px; border: none; color: #ff3333; opacity: 0.5;">[DEV: FAST BOOT]</button>
         </div>
         
@@ -869,7 +868,7 @@
 
     <!-- BOOT SPLASH SCREEN -->
     <div id="boot-splash" class="modal-overlay" style="z-index: 200; background: var(--pip-bg); flex-direction: column; display: flex;">
-        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.52</span>
+        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.53</span>
         <div class="crt" style="position: absolute; top:0; left:0; right:0; bottom:0; pointer-events: none; z-index: 201;"></div>
         <div style="z-index: 202; width: 100%; max-width: 600px; padding: 20px; text-align: left; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; justify-content: flex-end;" id="boot-text-container">
             <p id="boot-log-1" style="margin-bottom: 5px; display: none; font-size: 1rem;">ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM</p>

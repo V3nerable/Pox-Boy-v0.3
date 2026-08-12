@@ -1,4 +1,6 @@
-const CACHE_NAME = 'pipboy-cache-v41';
+const CACHE_NAME = 'pipboy-cache-v42';
+// v0.53: radio packs live in their own bucket -- app updates must NEVER wipe them
+const RADIO_CACHE = 'pox-radio-v1';
 
 const urlsToCache = [
   './',
@@ -10,6 +12,7 @@ const urlsToCache = [
   './icon-192.png',
   './icon-512.png',
   './geiger.mp3',
+  './radio-stations.json',
   'https://fonts.googleapis.com/css2?family=VT323&display=swap'
 ];
 
@@ -26,7 +29,7 @@ self.addEventListener('activate', event => {
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
-          if (cacheName !== CACHE_NAME) {
+          if (cacheName !== CACHE_NAME && cacheName !== RADIO_CACHE) {
             return caches.delete(cacheName); // Delete old caches automatically
           }
         })
@@ -76,11 +79,15 @@ self.addEventListener('fetch', event => {
       })
     );
   } else {
+    // v0.53: radio CDN traffic -- the downloader owns pox-radio-v1; this branch only
+    // (a) serves onboard packs when offline and (b) streams when online WITHOUT
+    // double-storing 100MB of audio into the app cache on autopilot.
+    const isRadio = req.url.indexOf('pox-radio.netlify.app') !== -1;
     event.respondWith(
       caches.match(req).then(cached => {
         if (cached) return cached;
         return fetch(req).then(networkResp => {
-          if (networkResp) {
+          if (networkResp && !isRadio) {
             const copy = networkResp.clone();
             caches.open(CACHE_NAME)
               .then(cache => cache.put(req, copy))

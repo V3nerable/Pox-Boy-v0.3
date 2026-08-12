@@ -141,6 +141,11 @@
 
         let activeItemId = null;
         let currentInvTab = 'weapons';
+        let currentStatTab = 'status'; // v0.53: STAT sub-pages now tracked (stats moved here)
+        function statsPaneActive() {
+            const st = document.getElementById('tab-stat');
+            return !!(st && st.classList.contains('active') && currentStatTab === 'stats');
+        }
         let currentDataTab = 'quests';
 
         const themes = [
@@ -828,11 +833,11 @@
 
             const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
 
-            // Button Visibility Logic
-            document.getElementById('add-item-btn').style.display = (tabId === 'inv' && isDev) ? 'inline-block' : 'none';
+            // Button Visibility Logic (v0.53: INV retired; dev console lives under STAT > STATS)
+            const aib = document.getElementById('add-item-btn'); if (aib) aib.style.display = 'none';
             document.getElementById('add-quest-btn').style.display = (tabId === 'data' && currentDataTab === 'quests' && isDev) ? 'inline-block' : 'none';
             document.getElementById('faction-controls').style.display = (tabId === 'data' && currentDataTab === 'factions' && isDev) ? 'flex' : 'none';
-            document.getElementById('dev-controls').style.display = (tabId === 'data' && currentDataTab === 'stats') ? 'flex' : 'none';
+            document.getElementById('dev-controls').style.display = (tabId === 'stat' && currentStatTab === 'stats') ? 'flex' : 'none';
             
             document.getElementById('map-controls').style.display = (tabId === 'map' && isDev) ? 'flex' : 'none';
             const addMarkerBtn = document.getElementById('dev-add-marker-btn');
@@ -840,13 +845,12 @@
             if (addMarkerBtn) addMarkerBtn.style.display = isDev ? 'inline-block' : 'none';
             if (remMarkerBtn) remMarkerBtn.style.display = isDev ? 'inline-block' : 'none';
 
-            if (tabId === 'inv') renderInventory(currentInvTab);
+            if (tabId === 'stat' && currentStatTab === 'stats') renderStatsTab(); // v0.53
+            if (tabId === 'mail') { renderMail(); refreshOutboxStatuses(); }      // v0.53: top-level MAIL tab
             if (tabId === 'data') {
                 if (currentDataTab === 'quests') renderQuests();
                 if (currentDataTab === 'factions') renderFactions();
-                if (currentDataTab === 'stats') renderStatsTab();
                 if (currentDataTab === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
-                if (currentDataTab === 'mail') { renderMail(); refreshOutboxStatuses(); }
             }
             if (tabId === 'map') {
                 // Leaflet needs to calculate size AFTER display block is applied
@@ -870,23 +874,29 @@
             
             const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
             
-            if (parentTab === 'inv') { 
-                currentInvTab = subTabId; 
-                renderInventory(subTabId); 
+            if (parentTab === 'inv') {
+                currentInvTab = subTabId; // v0.53: INV tab retired; branch kept inert for stale callers
+                renderInventory(subTabId);
+            } else if (parentTab === 'stat') {
+                // v0.53: STAT gained a STATS sub-page (relocated from DATA) hosting the
+                // Overseer console (pariah/zone panels) under dev-mode.
+                currentStatTab = subTabId;
+                document.getElementById('dev-controls').style.display = (subTabId === 'stats') ? 'flex' : 'none';
+                document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
+                document.getElementById(`sub-${parentTab}-${subTabId}`).classList.add('active');
+                if (subTabId === 'stats') renderStatsTab();
             } else if (parentTab === 'data') {
                 currentDataTab = subTabId;
                 document.getElementById('add-quest-btn').style.display = (subTabId === 'quests' && isDev) ? 'inline-block' : 'none';
                 document.getElementById('faction-controls').style.display = (subTabId === 'factions' && isDev) ? 'flex' : 'none';
-                document.getElementById('dev-controls').style.display = (subTabId === 'stats') ? 'flex' : 'none';
+                const devBtns = document.getElementById('dev-controls'); if (devBtns && subTabId !== '_mail') devBtns.style.display = (currentStatTab === 'stats' && document.getElementById('tab-stat').classList.contains('active')) ? 'flex' : 'none';
 
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
                 document.getElementById(`sub-${parentTab}-${subTabId}`).classList.add('active');
                 if (subTabId === 'quests') renderQuests();
                 if (subTabId === 'contracts') renderContracts();
                 if (subTabId === 'factions') renderFactions();
-                if (subTabId === 'stats') renderStatsTab();
                 if (subTabId === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
-                if (subTabId === 'mail') { renderMail(); refreshOutboxStatuses(); }
             } else {
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
                 document.getElementById(`sub-${parentTab}-${subTabId}`).classList.add('active');
@@ -1254,6 +1264,7 @@
 
         // Inventory Logic
         function renderInventory(category) {
+            if (!document.getElementById('inv-container')) return; // v0.53: INV tab retired -- function inert
             const container = document.getElementById('inv-container');
             container.innerHTML = '';
             const filtered = items.filter(i => i.type === category);
@@ -2297,6 +2308,11 @@
             // v0.52: if GPS auto-armed before the map ever initialised, our dot was
             // deferred (no markersGroup to draw into) -- draw it now.
             if (gpsWatchId !== null && myLastLat !== null && myLastLng !== null && !userMarker) ensureUserMarker(myLastLat, myLastLng);
+            // v0.53 ZONE FIX (user: "zones disappeared from the map but still in the remove
+            // list"): radzones/ fires at comms boot, mapless, so its first emission was
+            // guard-swallowed and nothing EVER re-rendered zones on map open -- they only
+            // appeared after a live drop/extinguish. Repaint from the stored mirror now.
+            renderRadZones(lastKnownRadZones);
             
             // Start listening to Firebase for other players
             if (window.db) {
@@ -3507,7 +3523,8 @@
             return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         }
         function mailTabActive() {
-            return document.getElementById('tab-data').classList.contains('active') && currentDataTab === 'mail';
+            const t = document.getElementById('tab-mail'); // v0.53: MAIL is a top-level tab
+            return !!t && t.classList.contains('active');
         }
         function safeUid(uid) { return String(uid || '').replace(/[^A-Za-z0-9_\-]/g, ''); }
         // v0.48: hoisted GLOBAL (was a closure inside renderMail — a ReferenceError in
@@ -3854,7 +3871,7 @@
             window.firebaseOnValue(window.firebaseRef(window.db, 'pariahs/'), (snap) => {
                 pariahMarks = snap.val() || {};
                 evalPariahField(); // a fresh decree can bathe you where you stand
-                if (currentDataTab === 'stats') renderStatsTab();
+                if (statsPaneActive()) renderStatsTab(); // v0.53
             }, () => {}); // offline: last known decree list stands
         }
 
@@ -3863,7 +3880,7 @@
             window.firebaseOnValue(window.firebaseRef(window.db, 'radzones/'), (snap) => {
                 renderRadZones(snap.val() || {});
                 evalPariahField(); // a dropped zone can bathe you where you stand
-                if (currentDataTab === 'stats') renderStatsTab();
+                if (statsPaneActive()) renderStatsTab(); // v0.53
             }, () => {}); // offline: last known zone board stands
         }
 
@@ -4327,7 +4344,7 @@
 
         // --- RENDERERS: badge / rolodex / mail ---
         function renderMailBadge() {
-            const el = document.getElementById('data-mail-navitem');
+            const el = document.getElementById('mail-navitem'); // v0.53: badge rides the top-level MAIL tab
             if (!el) return;
             const n = Object.keys(inboxLetters).length;
             const u = Object.keys(unverifiedLetters).length;
@@ -4403,7 +4420,7 @@
                         closeModals();
                         renderWastelanders();
                         renderMailBadge();
-                        if (currentDataTab === 'stats') renderStatsTab();
+                        if (statsPaneActive()) renderStatsTab(); // v0.53
                     }
                 },
                 { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
@@ -5134,8 +5151,7 @@
             } else if (contact) {
                 actions.innerHTML =
                     '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'msg\', \'' + uid + '\')">[ MSG ]</button>' +
-                    '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'quest\', \'' + uid + '\')">[ QUEST ]</button>' +
-                    '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'item\', \'' + uid + '\')">[ ITEM ]</button>';
+                    '<button class="theme-btn" style="flex:1;" onclick="composeTo(\'quest\', \'' + uid + '\')">[ QUEST ]</button>';
             } else {
                 // v0.37: cold-contact restored -- datacard (link request) + one-way message
                 // straight from the map card; quests/items still require a mutual scan.
@@ -5189,8 +5205,200 @@
         }
         window.addEventListener('online', () => { flushOutbox(); refreshOutboxStatuses(); });
         setInterval(() => { flushOutbox(); refreshOutboxStatuses(); }, 20000);
+
+        // ========================= POX RADIO (v0.53) =========================
+        // Three looping dials from radio-stations.json (precached app file). Audio lives
+        // ONLY on the radio CDN (base field per station) — nothing rides the app bundle.
+        // Packs download once into a dedicated Cache bucket (RADIO_CACHE, whitelisted in
+        // sw.js so app updates never wipe your stations) and play offline forever;
+        // undownloaded dials stream while online. Playback routes through the SW's
+        // cross-origin cache-first branch, so a downloaded pack answers even with the
+        // radio off. Static bursts are synthesized (no file). No DJ/bulletins (user cut).
+        const RADIO_CACHE = 'pox-radio-v1';
+        let radioManifest = null;
+        let radioCur = null;            // station id currently playing, or null
+        let radioTrackIdx = 0;
+        let radioDlState = {};          // { sid: true } pipboy-radio-dl (the ONBOARD badge)
+        let radioPos = {};              // { sid: lastTrackIdx } pipboy-radio-pos (resume memory)
+        let radioDlRunning = false;
+        let radioDlStop = false;
+        const radioAudio = new Audio();
+        radioAudio.preload = 'auto';
+
+        function stationById(sid) { return radioManifest ? radioManifest.stations.find(s => s.id === sid) : null; }
+        function trackUrl(st, tr) { return st.base + '/' + encodeURIComponent(tr.f); }
+        function saveRadioState() {
+            localStorage.setItem('pipboy-radio-dl', JSON.stringify(radioDlState));
+            localStorage.setItem('pipboy-radio-pos', JSON.stringify(radioPos));
+        }
+
+        function initRadio() {
+            radioDlState = JSON.parse(localStorage.getItem('pipboy-radio-dl') || '{}');
+            radioPos = JSON.parse(localStorage.getItem('pipboy-radio-pos') || '{}');
+            fetch('radio-stations.json').then(r => r.json()).then(m => {
+                radioManifest = m;
+                renderRadioTab();
+            }).catch(() => {
+                const el = document.getElementById('radio-now');
+                if (el) el.innerText = 'STATION MANIFEST OFFLINE -- RETRY WHEN IN SIGNAL RANGE.';
+            });
+        }
+
+        function renderRadioTab() {
+            if (!radioManifest) return;
+            radioManifest.stations.forEach(st => {
+                const row = document.getElementById('rs-' + st.id);
+                if (!row) return;
+                const state = row.querySelector('.rs-state');
+                if (state) state.innerText = radioDlState[st.id]
+                    ? 'ONBOARD'
+                    : (st.tracks.length + ' TRKS · ' + (st.tracks.reduce((a, t) => a + t.b, 0) / 1048576).toFixed(1) + 'MB');
+                row.classList.toggle('playing', radioCur === st.id);
+            });
+        }
+
+        function radioStationTap(sid) {
+            const st = stationById(sid);
+            if (!st) { showNotification('STATION LIST NOT LOADED YET -- CHECK SIGNAL.'); return; }
+            if (radioCur === sid) { radioStop(); return; } // tapping the live dial kills it
+            radioCur = sid;
+            radioTrackIdx = (radioPos[sid] != null && radioPos[sid] < st.tracks.length) ? radioPos[sid] : 0;
+            radioStatic(420);
+            radioPlayCurrent();
+        }
+
+        function radioPlayCurrent() {
+            const st = stationById(radioCur);
+            if (!st) return;
+            const tr = st.tracks[radioTrackIdx];
+            const now = document.getElementById('radio-now');
+            radioAudio.src = trackUrl(st, tr);
+            radioAudio.onended = () => { radioStatic(550); radioNext(); };
+            radioAudio.onerror = () => {
+                if (now) now.innerText = 'NO SIGNAL -- ' + st.name + ' NEEDS THE PACK ([⇩] BELOW) OR A LIVE LINK.';
+            };
+            radioAudio.play().catch(() => {});
+            if (now) now.innerText = st.name + ' :: ' + tr.a + ' — ' + tr.t;
+            renderRadioTab();
+        }
+
+        function radioNext() {
+            const st = stationById(radioCur);
+            if (!st) return;
+            radioTrackIdx = (radioTrackIdx + 1) % st.tracks.length; // just looping
+            radioPos[radioCur] = radioTrackIdx;
+            saveRadioState();
+            radioPlayCurrent();
+        }
+        function radioNextUi() {
+            if (!radioCur) { showNotification('TUNE A STATION FIRST.'); return; }
+            radioStatic(300);
+            radioNext();
+        }
+
+        function radioStop() {
+            radioCur = null;
+            radioAudio.pause();
+            const now = document.getElementById('radio-now');
+            if (now) now.innerText = 'RADIO OFF';
+            renderRadioTab();
+        }
+
+        // Short synthesized static burst (bandpassed brown noise; no audio file needed).
+        let _radioAc = null;
+        function radioStatic(ms) {
+            try {
+                if (!_radioAc) _radioAc = new (window.AudioContext || window.webkitAudioContext)();
+                const ac = _radioAc;
+                if (ac.state === 'suspended') ac.resume();
+                const dur = Math.max(0.15, (ms || 500) / 1000);
+                const buf = ac.createBuffer(1, Math.floor(ac.sampleRate * dur), ac.sampleRate);
+                const ch = buf.getChannelData(0);
+                let last = 0;
+                for (let i = 0; i < ch.length; i++) {
+                    const w = Math.random() * 2 - 1;
+                    last = (last + 0.02 * w) / 1.02;  // brown-ish
+                    ch[i] = last * 3.5;
+                }
+                const src = ac.createBufferSource(); src.buffer = buf;
+                const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1600; bp.Q.value = 0.4;
+                const g = ac.createGain(); g.gain.value = 0.45;
+                src.connect(bp); bp.connect(g); g.connect(ac.destination);
+                src.start();
+            } catch (e) {}
+        }
+
+        // --- DOWNLOADER (bottom button + themed size-confirm popup, user's spec) ---
+        function radioDownloadMenu() {
+            if (radioDlRunning) { radioDlStop = true; return; } // button doubles as STOP
+            if (!radioManifest) { showNotification('STATION LIST NOT LOADED YET -- CHECK SIGNAL.'); return; }
+            const sum = st => st.tracks.reduce((a, t) => a + t.b, 0);
+            const mb = b => '≈' + (b / 1048576).toFixed(1) + 'MB';
+            const missing = radioManifest.stations.filter(s => !radioDlState[s.id]);
+            if (!missing.length) { showNotification('ALL STATIONS ALREADY ONBOARD.'); return; }
+            const totalTracks = missing.reduce((a, s) => a + s.tracks.length, 0);
+            const totalBytes = missing.reduce((a, s) => a + sum(s), 0);
+            const btns = [{
+                label: 'ALL STATIONS ' + mb(totalBytes),
+                action: () => radioDownload(missing.map(s => s.id))
+            }];
+            missing.forEach(s => {
+                btns.push({ label: s.name + ' ' + mb(sum(s)), action: () => radioDownload([s.id]) });
+            });
+            btns.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
+            showCustomPrompt(
+                'RADIO CONTENT -- ' + totalTracks + ' TRANSMISSIONS ' + mb(totalBytes) + ' STILL TO COME. DOWNLOAD OVER WIFI; THE PACK CACHES ON THIS UNIT AND PLAYS OFFLINE FOREVER.',
+                btns);
+        }
+
+        async function radioDownload(sids) {
+            const status = document.getElementById('radio-dl-status');
+            const btn = document.getElementById('radio-dl-btn');
+            radioDlRunning = true; radioDlStop = false;
+            if (btn) btn.innerText = '[■ STOP DOWNLOAD]';
+            let failed = 0, finishedAll = true;
+            try {
+                const cache = await caches.open(RADIO_CACHE);
+                for (const sid of sids) {
+                    const st = stationById(sid);
+                    if (!st) continue;
+                    let stationFailed = 0;
+                    for (let i = 0; i < st.tracks.length; i++) {
+                        if (radioDlStop) { finishedAll = false; break; }
+                        if (!navigator.onLine) { finishedAll = false; break; }
+                        const tr = st.tracks[i];
+                        if (status) status.innerText = 'DOWNLOADING ' + st.name + ' · ' + (i + 1) + '/' + st.tracks.length + ' · ' + tr.t.substring(0, 22);
+                        const url = trackUrl(st, tr);
+                        try {
+                            if (await cache.match(url)) continue; // resume-safe: skip what's aboard
+                            const resp = await fetch(url);
+                            if (!resp || !resp.ok) throw new Error('http');
+                            const blob = await resp.blob();
+                            await cache.put(url, new Response(blob, { headers: { 'Content-Type': 'audio/ogg' } }));
+                        } catch (e) {
+                            failed++; stationFailed++;
+                        }
+                    }
+                    if (radioDlStop || !navigator.onLine) { finishedAll = false; break; }
+                    if (!stationFailed) { radioDlState[sid] = true; saveRadioState(); }
+                }
+            } catch (e) { finishedAll = false; }
+            radioDlRunning = false;
+            renderRadioTab();
+            if (btn) btn.innerText = '[⇩ DOWNLOAD RADIO CONTENT]';
+            if (status) {
+                status.innerText = failed ? (failed + ' TRACKS FAILED -- TAP [⇩] AGAIN TO RESUME/RETRY.')
+                    : (finishedAll ? 'REQUESTED STATIONS ONBOARD. OFFLINE-READY.'
+                    : (navigator.onLine ? 'DOWNLOAD STOPPED.' : 'SIGNAL LOST -- RESUME LATER OVER WIFI.'));
+            }
+            showNotification(failed ? 'RADIO DOWNLOAD: ' + failed + ' FAILURES -- RESUME FROM [⇩].'
+                : (finishedAll ? 'RADIO PACK ONBOARD.' : 'RADIO DOWNLOAD STOPPED.'));
+        }
+
+
         renderMailBadge();
         initComms();
+        initRadio();      // v0.53: load the three-dial manifest + download badges
         maybeAutoGps(); // v0.52: GPS is on-until-turned-off -- silently re-arm if it was left on
 
         // ==================== PWA INSTALL PIPELINE (v0.32) ====================
