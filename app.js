@@ -847,6 +847,7 @@
 
             if (tabId === 'stat' && currentStatTab === 'stats') renderStatsTab(); // v0.53
             if (tabId === 'mail') { renderMail(); refreshOutboxStatuses(); }      // v0.53: top-level MAIL tab
+            if (tabId === 'radio') renderRadioTab();                              // v0.54: overseer desk + LIVE badges on entry
             if (tabId === 'data') {
                 if (currentDataTab === 'quests') renderQuests();
                 if (currentDataTab === 'factions') renderFactions();
@@ -5222,6 +5223,12 @@
         let radioPos = {};              // { sid: lastTrackIdx } pipboy-radio-pos (resume memory)
         let radioDlRunning = false;
         let radioDlStop = false;
+        // --- v0.54 STATION SYNC (shared epoch playheads) ---
+        let radioLive = {};            // { sid: {epoch} } straight from the radio/ node
+        let radioServerOffset = 0;     // ms skew vs the satellite, via /.info/serverTimeOffset (phone clocks lie)
+        let radioSyncOn = localStorage.getItem('pipboy-radio-sync') !== 'off'; // default ON
+        let radioAppliedEpoch = {};    // { sid: epoch } this unit last joined with -- a change = SKIP/RESTART
+        let radioSyncTimer = null;     // 5s drift watchdog while synced
         const radioAudio = new Audio();
         radioAudio.preload = 'auto';
 
@@ -5237,11 +5244,13 @@
             radioPos = JSON.parse(localStorage.getItem('pipboy-radio-pos') || '{}');
             fetch('radio-stations.json').then(r => r.json()).then(m => {
                 radioManifest = m;
+                m.stations.forEach(s => { s.totalDur = s.tracks.reduce((a, t) => a + (t.d || 0), 0); }); // v0.54: sync math needs loop lengths
                 renderRadioTab();
             }).catch(() => {
                 const el = document.getElementById('radio-now');
                 if (el) el.innerText = 'STATION MANIFEST OFFLINE -- RETRY WHEN IN SIGNAL RANGE.';
             });
+            initRadioSync(0); // v0.54: satellite listeners (waits for window.db, retries like initComms)
         }
 
         function renderRadioTab() {
@@ -5250,11 +5259,21 @@
                 const row = document.getElementById('rs-' + st.id);
                 if (!row) return;
                 const state = row.querySelector('.rs-state');
-                if (state) state.innerText = radioDlState[st.id]
+                const live = !!(radioLive[st.id] && radioLive[st.id].epoch); // v0.54 LIVE badge
+                let txt = radioDlState[st.id]
                     ? 'ONBOARD'
                     : (st.tracks.length + ' TRKS · ' + (st.tracks.reduce((a, t) => a + t.b, 0) / 1048576).toFixed(1) + 'MB');
+                if (live) txt = '· LIVE · ' + txt;
+                if (state) {
+                    state.innerText = txt;
+                    state.style.color = live ? '#ffb642' : '';
+                    state.style.textShadow = live ? '0 0 5px #ffb642' : '';
+                }
                 row.classList.toggle('playing', radioCur === st.id);
             });
+            const sb = document.getElementById('radio-sync-btn');
+            if (sb) sb.innerText = '[ STATION SYNC: ' + (radioSyncOn ? 'ON' : 'OFF') + ' ]';
+            renderRadioOverseer();
         }
 
         function radioStationTap(sid) {
@@ -5262,23 +5281,38 @@
             if (!st) { showNotification('STATION LIST NOT LOADED YET -- CHECK SIGNAL.'); return; }
             if (radioCur === sid) { radioStop(); return; } // tapping the live dial kills it
             radioCur = sid;
-            radioTrackIdx = (radioPos[sid] != null && radioPos[sid] < st.tracks.length) ? radioPos[sid] : 0;
-            radioStatic(420);
-            radioPlayCurrent();
+            if (radioIsSynced(sid)) {
+                radioJoinLive(true); // v0.54: land on the same second of the same track as everyone
+                showNotification('TUNED TO LIVE BROADCAST.');
+            } else {
+                radioTrackIdx = (radioPos[sid] != null && radioPos[sid] < st.tracks.length) ? radioPos[sid] : 0;
+                radioStatic(420);
+                radioPlayCurrent();
+            }
+            radioSyncWatchdog();
         }
 
-        function radioPlayCurrent() {
+        function radioPlayCurrent(startAt) {
             const st = stationById(radioCur);
             if (!st) return;
             const tr = st.tracks[radioTrackIdx];
             const now = document.getElementById('radio-now');
+            const synced = radioIsSynced(radioCur); // v0.54
             radioAudio.src = trackUrl(st, tr);
-            radioAudio.onended = () => { radioStatic(550); radioNext(); };
+            radioAudio.onloadedmetadata = synced ? () => {
+                try {
+                    const p = radioLivePos(radioCur); // re-derive AT load time -- buffering burned wall-clock
+                    const want = (p && p.idx === radioTrackIdx) ? p.seek : (startAt || 0);
+                    radioAudio.currentTime = Math.max(0, Math.min(want, (radioAudio.duration || want) - 0.25));
+                } catch (e) {}
+            } : null;
+            radioAudio.onended = synced ? () => radioSyncBoundary(0)
+                                        : () => { radioStatic(550); radioNext(); };
             radioAudio.onerror = () => {
                 if (now) now.innerText = 'NO SIGNAL -- ' + st.name + ' NEEDS THE PACK ([⇩] BELOW) OR A LIVE LINK.';
             };
             radioAudio.play().catch(() => {});
-            if (now) now.innerText = st.name + ' :: ' + tr.a + ' — ' + tr.t;
+            if (now) now.innerText = (synced ? 'LIVE · ' : '') + st.name + ' :: ' + tr.a + ' — ' + tr.t;
             renderRadioTab();
         }
 
@@ -5292,16 +5326,189 @@
         }
         function radioNextUi() {
             if (!radioCur) { showNotification('TUNE A STATION FIRST.'); return; }
+            if (radioIsSynced(radioCur)) { showNotification('SYNC LOCKED -- THE OVERSEER RUNS THIS DIAL. (SYNC OFF FOR LOCAL CONTROL)'); return; } // v0.54
             radioStatic(300);
             radioNext();
         }
 
         function radioStop() {
+            if (radioCur) delete radioAppliedEpoch[radioCur];
             radioCur = null;
             radioAudio.pause();
+            if (radioSyncTimer) { clearInterval(radioSyncTimer); radioSyncTimer = null; } // v0.54
             const now = document.getElementById('radio-now');
             if (now) now.innerText = 'RADIO OFF';
             renderRadioTab();
+        }
+
+        // ==================== RADIO SYNC ENGINE (v0.54) ====================
+        // Live radio with zero servers: nobody broadcasts audio -- we sync PLAYHEADS. The
+        // Overseer writes radio/{sid} {epoch}; every unit computes elapsed = serverNow - epoch,
+        // walks the manifest durations (t.d, harvested from the ogg tails) and lands on the same
+        // track at the same second. Accuracy ±2s via /.info/serverTimeOffset -- inaudible under
+        // the AM static bed baked into every track. Off-air or SYNC OFF = v0.53 free-run loops.
+        function radioServerNow() { return Date.now() + radioServerOffset; }
+        function radioIsSynced(sid) {
+            const st = stationById(sid);
+            return !!(radioSyncOn && st && st.totalDur > 0 && radioLive[sid] && radioLive[sid].epoch);
+        }
+        function radioLivePos(sid) {
+            const st = stationById(sid);
+            const row = radioLive[sid];
+            if (!st || !st.totalDur || !row || !row.epoch) return null;
+            let el = ((radioServerNow() - row.epoch) / 1000) % st.totalDur;
+            if (el < 0) el += st.totalDur;
+            let acc = 0;
+            for (let i = 0; i < st.tracks.length; i++) {
+                const d = st.tracks[i].d || 0;
+                if (el < acc + d) return { idx: i, seek: el - acc };
+                acc += d;
+            }
+            return { idx: 0, seek: 0 };
+        }
+        // Snap local state to the live playhead and play. withStatic = crackle flourish on a
+        // manual tune or an overseer shift; boundary hops stay tight (static's baked into tracks).
+        function radioJoinLive(withStatic) {
+            const sid = radioCur;
+            if (!sid || !radioIsSynced(sid)) return;
+            const pos = radioLivePos(sid) || { idx: 0, seek: 0 };
+            radioTrackIdx = pos.idx;
+            radioPos[sid] = pos.idx;
+            radioAppliedEpoch[sid] = radioLive[sid].epoch;
+            saveRadioState();
+            if (withStatic) radioStatic(420);
+            radioPlayCurrent(pos.seek);
+        }
+        // A synced track ended -- the shared clock should be across the boundary too. If skew
+        // says "not yet" (pos still inside the just-ended track), wait and re-eval a few times,
+        // then give up and advance locally so the loop can never stall.
+        function radioSyncBoundary(retry) {
+            if (!radioCur || !radioIsSynced(radioCur)) return;
+            const st = stationById(radioCur);
+            const pos = radioLivePos(radioCur);
+            if (!pos) return; // broadcast cut -- the radio/ listener handles the stop
+            const endNear = (st.tracks[radioTrackIdx].d || 0) - 0.75;
+            if (pos.idx === radioTrackIdx && pos.seek > endNear) {
+                if ((retry || 0) < 4) { setTimeout(() => radioSyncBoundary((retry || 0) + 1), 800); }
+                else { radioNext(); }
+                return;
+            }
+            radioTrackIdx = pos.idx;
+            radioPos[radioCur] = pos.idx;
+            saveRadioState();
+            radioPlayCurrent(pos.seek);
+        }
+        // 5s drift watchdog: full rejoin when the shared playhead is on another track (covers
+        // overseer SKIP), hard punch only past 1.5s adrift so there's no constant micro-stutter.
+        function radioSyncWatchdog() {
+            if (radioSyncTimer) { clearInterval(radioSyncTimer); radioSyncTimer = null; }
+            if (!radioCur || !radioIsSynced(radioCur)) return;
+            radioSyncTimer = setInterval(() => {
+                if (!radioCur || !radioIsSynced(radioCur)) { clearInterval(radioSyncTimer); radioSyncTimer = null; return; }
+                const pos = radioLivePos(radioCur);
+                if (!pos) return;
+                if (pos.idx !== radioTrackIdx) { radioJoinLive(false); return; }
+                try { if (Math.abs((radioAudio.currentTime || 0) - pos.seek) > 1.5) radioAudio.currentTime = pos.seek; } catch (e) {}
+            }, 5000);
+        }
+        function radioSyncToggle() {
+            radioSyncOn = !radioSyncOn;
+            localStorage.setItem('pipboy-radio-sync', radioSyncOn ? 'on' : 'off');
+            if (radioCur) radioStop(); // clean re-tune under the new mode
+            showNotification(radioSyncOn
+                ? 'STATION SYNC ON -- TAP A DIAL TO JOIN THE LIVE BROADCAST.'
+                : 'STATION SYNC OFF -- DIALS FREE-RUN ON THIS UNIT.');
+            renderRadioTab();
+        }
+        // Satellite listeners; deferred until window.db exists (same retry shape as initComms).
+        function initRadioSync(tries) {
+            if (window.db && window.firebaseOnValue && window.firebaseRef) {
+                window.firebaseOnValue(window.firebaseRef(window.db, '.info/serverTimeOffset'), (snap) => {
+                    radioServerOffset = snap.val() || 0;
+                }, () => {});
+                window.firebaseOnValue(window.firebaseRef(window.db, 'radio/'), (snap) => {
+                    radioLive = snap.val() || {};
+                    if (radioCur) {
+                        const row = radioLive[radioCur];
+                        if (!row || !row.epoch) {
+                            if (radioAppliedEpoch[radioCur]) { // we were synced: the dial went dark for everyone
+                                radioStop();
+                                showNotification('BROADCAST ENDED -- THE DIAL WENT DARK.');
+                            }
+                        } else if (radioSyncOn && radioAppliedEpoch[radioCur] !== undefined && radioAppliedEpoch[radioCur] !== row.epoch) {
+                            radioJoinLive(true); // overseer SKIP / fresh GO LIVE shifted the playhead
+                            showNotification('OVERSEER SHIFTED THE BROADCAST.');
+                        }
+                    }
+                    renderRadioTab();
+                }, () => {});
+            } else if ((tries || 0) < 40) {
+                setTimeout(() => initRadioSync((tries || 0) + 1), 2500);
+            }
+        }
+        // --- OVERSEER BROADCAST DESK (dev-mode only; rides the same PIN/self-police trust model as radzones) ---
+        function renderRadioOverseer() {
+            const box = document.getElementById('radio-overseer');
+            if (!box || !radioManifest) return;
+            if (localStorage.getItem('pipboy-dev-mode') !== 'true') { box.style.display = 'none'; box.innerHTML = ''; return; }
+            box.style.display = 'block';
+            let h = '<div style="border: 1px dashed #ff3333; padding: 8px; margin: 12px 0; font-size: 0.8rem;">';
+            h += '<div style="color: #ff3333; text-shadow: 0 0 5px #ff3333; margin-bottom: 6px;">== OVERSEER BROADCAST DESK ==</div>';
+            radioManifest.stations.forEach(st => {
+                const live = !!(radioLive[st.id] && radioLive[st.id].epoch);
+                const pos = live ? radioLivePos(st.id) : null;
+                h += '<div style="display: flex; align-items: center; gap: 6px; margin: 5px 0; flex-wrap: wrap;">';
+                h += '<span style="flex: 1; min-width: 100px; font-size: 0.75rem;">' + st.name + '</span>';
+                if (live && pos) {
+                    h += '<span style="color: #ffb642; font-size: 0.7rem;">ON AIR · TRK ' + (pos.idx + 1) + '/' + st.tracks.length + '</span>';
+                    h += '<button class="pip-btn" style="padding: 2px 6px; font-size: 0.7rem; width: auto;" onclick="radioOverseerSkip(\'' + st.id + '\')">[▶▶ SKIP]</button>';
+                    h += '<button class="pip-btn" style="padding: 2px 6px; font-size: 0.7rem; width: auto; border-color: #ff3333; color: #ff3333;" onclick="radioOverseerCut(\'' + st.id + '\')">[◼ CUT]</button>';
+                } else {
+                    h += '<span style="opacity: 0.55; font-size: 0.7rem;">OFF AIR</span>';
+                    h += '<button class="pip-btn" style="padding: 2px 6px; font-size: 0.7rem; width: auto;" onclick="radioOverseerOnAir(\'' + st.id + '\')">[● GO LIVE]</button>';
+                }
+                h += '</div>';
+            });
+            h += '<div style="opacity: 0.55; font-size: 0.7rem; margin-top: 4px;">EVERY SYNCED UNIT HEARS THE SAME TRACK AT THE SAME SECOND (±2S). CUT SETS THE DIAL DARK FOR EVERYONE.</div>';
+            h += '</div>';
+            box.innerHTML = h;
+        }
+        function radioWriteEpoch(sid, epoch) {
+            if (!window.db) { showNotification('NO SATELLITE LINK.'); return; }
+            window.firebaseSet(window.firebaseRef(window.db, 'radio/' + sid), { epoch: epoch })
+                .then(() => { showNotification('BROADCAST UPDATED.'); renderRadioTab(); })
+                .catch(() => showNotification('BROADCAST WRITE REJECTED -- RADIO NODE MISSING FROM RULES (DO THE RULES PASTE).'));
+        }
+        function radioOverseerOnAir(sid) {
+            const st = stationById(sid);
+            if (!st) return;
+            showCustomPrompt('GO LIVE ON ' + st.name + '? EVERY UNIT WITH STATION SYNC ON HEARS THIS DIAL FROM TRACK 1, TOGETHER (±2S).', [
+                { label: 'GO LIVE', action: () => radioWriteEpoch(sid, radioServerNow()) },
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+        function radioOverseerSkip(sid) {
+            const st = stationById(sid);
+            const pos = radioLivePos(sid);
+            if (!st || !pos) return;
+            let acc = 0; // loop-seconds through the END of the current track = next track's start
+            for (let i = 0; i <= pos.idx; i++) acc += (st.tracks[i].d || 0);
+            acc = acc % st.totalDur;
+            radioWriteEpoch(sid, radioServerNow() - Math.round(acc * 1000));
+            showNotification('SKIPPED -- ALL SYNCED UNITS JUMP TOGETHER.');
+        }
+        function radioOverseerCut(sid) {
+            const st = stationById(sid);
+            if (!st) return;
+            showCustomPrompt('CUT ' + st.name + ' BROADCAST? EVERY SYNCED UNIT ON THIS DIAL GOES SILENT.', [
+                { label: 'CUT BROADCAST', color: '#ff3333', action: () => {
+                    if (!window.db) { showNotification('NO SATELLITE LINK.'); return; }
+                    window.firebaseRemove(window.firebaseRef(window.db, 'radio/' + sid))
+                        .then(() => showNotification('BROADCAST CUT.'))
+                        .catch(() => showNotification('CUT REJECTED -- CHECK RULES.'));
+                } },
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
         }
 
         // Short synthesized static burst (bandpassed brown noise; no audio file needed).
