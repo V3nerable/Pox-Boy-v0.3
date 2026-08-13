@@ -54,7 +54,7 @@
         <div style="display: flex; flex-direction: column;">
             <div style="display: flex; align-items: baseline; gap: 10px;">
                 <span class="header-title" id="main-os-title">POX-BOY 3026</span>
-                <span style="font-size: 0.8rem; opacity: 0.5;">v0.54</span>
+                <span style="font-size: 0.8rem; opacity: 0.5;">v0.55</span>
             </div>
             <span id="pip-clock" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px;"></span>
             <span id="pip-batt" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px; display: none;"></span>
@@ -389,6 +389,11 @@
                 <button class="theme-btn" id="dev-add-marker-btn" onclick="openAddWaypointModal()" style="display: none;">+ ADD MARKER</button>
                 <button class="theme-btn" id="dev-remove-marker-btn" onclick="openRemoveWaypointModal()" style="border-style: dashed; display: none;">- REMOVE MARKER</button>
             </div>
+            <!-- v0.55: camera orders are explicit now (the map no longer yanks to your face) -->
+            <div id="map-cam-controls" style="display: none; justify-content: center; gap: 10px;">
+                <button class="theme-btn" onclick="mapGoMe()" style="border-style: dashed;">[&nbsp;◎ ME&nbsp;]</button>
+                <button class="theme-btn" onclick="mapFitAll()" style="border-style: dashed;">[&nbsp;⛶ FIT ALL&nbsp;]</button>
+            </div>
             <div id="dev-controls" style="display: none; justify-content: center; gap: 10px;">
                 <button class="theme-btn" onclick="triggerDevReset()" style="border-color: #ff3333; color: #ff3333;">FACTORY RESET</button>
                 <button class="theme-btn" onclick="toggleDevMode()" style="border-color: #42b6ff; color: #42b6ff;">TOGGLE OVERSEER</button>
@@ -644,13 +649,12 @@
         <div class="modal-content" style="max-height: 90vh; overflow-y: auto;">
             <h3>ADD NEW QUEST</h3>
             <div class="form-group"><label>QUEST TITLE</label><input type="text" id="q-name" class="pip-input vk-target" readonly onclick="openVk('q-name')" placeholder="e.g. Find the VIP Lounge"></div>
+            <!-- v0.55: both are themed prompt pickers now; the fields display the choice -->
             <div class="form-group"><label>TYPE</label>
-                <select id="q-type" class="pip-input"><option value="MAIN">MAIN QUEST</option><option value="SIDE">SIDE QUEST</option></select>
+                <input type="text" id="q-type" class="pip-input" readonly onclick="pickQuestType()" style="cursor: pointer;" value="MAIN QUEST">
             </div>
             <div class="form-group"><label>GIVEN BY</label>
-                <select id="q-giver" class="pip-input">
-                    <!-- Populated by JS -->
-                </select>
+                <input type="text" id="q-giver" class="pip-input" readonly onclick="pickQuestGiver()" style="cursor: pointer;" value="UNKNOWN WASTELANDER">
             </div>
             <div class="form-group"><label>LOCATION</label><input type="text" id="q-loc" class="pip-input vk-target" readonly onclick="openVk('q-loc')" placeholder="e.g. Floor 2"></div>
             <div class="form-group"><label>EXPIRATION TIME (Optional)</label><input type="text" id="q-time" class="pip-input vk-target" readonly onclick="openVk('q-time')" placeholder="e.g. 18:00 (24h format)"></div>
@@ -719,20 +723,7 @@
         </div>
     </div>
 
-    <!-- REMOVE WAYPOINT MODAL -->
-    <div id="remove-waypoint-modal" class="modal-overlay">
-        <div class="modal-content">
-            <h3>REMOVE MAP MARKER</h3>
-            <div class="form-group"><label>SELECT MARKER</label>
-                <select id="wp-remove-select" class="pip-input">
-                    <!-- Populated by JS -->
-                </select>
-            </div>
-            
-            <button class="pip-btn" onclick="deleteWaypoint()">DELETE MARKER</button>
-            <button class="pip-btn" onclick="closeModals()" style="margin-top: 15px; border-style: dashed;">CANCEL</button>
-        </div>
-    </div>
+    <!-- v0.55: REMOVE WAYPOINT modal deleted -- removal is a themed prompt picker now -->
 
     <!-- AUTH MODAL -->
     <div id="auth-modal" class="modal-overlay" style="z-index: 60;">
@@ -785,8 +776,9 @@
         <div class="modal-content" style="max-height: 90vh; overflow-y: auto;">
             <h3>EDIT FACTION</h3>
             <div class="form-group">
-                <label>SELECT FACTION</label>
-                <select id="fac-edit-select" class="pip-input" onchange="populateEditFaction()"></select>
+                <label>FACTION UNDER EDIT</label>
+                <!-- v0.55: themed prompt picker, no native dropdown chrome -->
+                <input type="text" id="fac-edit-select" class="pip-input" readonly onclick="pickFactionToEdit()" style="cursor: pointer;" value="CHOOSE FACTION...">
             </div>
             <div class="form-group"><label>FACTION NAME</label><input type="text" id="edit-fac-name" class="pip-input vk-target" readonly onclick="openVk('edit-fac-name')"></div>
             <div class="form-group"><label>CURRENT REP</label>
@@ -850,7 +842,7 @@
     <div id="pre-boot-overlay" class="modal-overlay" style="z-index: 250; background: var(--pip-bg); flex-direction: column; display: none;">
         <!-- Version Tag & Dev Skip Button -->
         <div style="position: absolute; top: 10px; right: 10px; z-index: 260; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-            <span style="font-size: 0.8rem; opacity: 0.5;">v0.54</span>
+            <span style="font-size: 0.8rem; opacity: 0.5;">v0.55</span>
             <button class="pip-btn" onclick="devSkipToApp()" style="font-size: 0.7rem; padding: 2px 5px; border: none; color: #ff3333; opacity: 0.5;">[DEV: FAST BOOT]</button>
         </div>
         
@@ -872,7 +864,7 @@
 
     <!-- BOOT SPLASH SCREEN -->
     <div id="boot-splash" class="modal-overlay" style="z-index: 200; background: var(--pip-bg); flex-direction: column; display: flex;">
-        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.54</span>
+        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.55</span>
         <div class="crt" style="position: absolute; top:0; left:0; right:0; bottom:0; pointer-events: none; z-index: 201;"></div>
         <div style="z-index: 202; width: 100%; max-width: 600px; padding: 20px; text-align: left; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; justify-content: flex-end;" id="boot-text-container">
             <p id="boot-log-1" style="margin-bottom: 5px; display: none; font-size: 1rem;">ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM</p>

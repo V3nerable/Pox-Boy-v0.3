@@ -472,3 +472,7 @@ html.plock-270 body { top: 0;    left: 100%; transform-origin: left top; transfo
 html.plock-90 #map-container, html.plock-270 #map-container { height: 44vw !important; min-height: 300px; }
 html.plock-90 .modal-content, html.plock-270 .modal-content { max-height: 90vw; }
 html.plock-90 #pre-boot-box,  html.plock-270 #pre-boot-box  { max-height: 96vw !important; }
+
+        /* v0.55: pulsing mail envelope on the MAIL nav tab when transmissions wait */
+        .mail-pip { color: #ffb642; text-shadow: 0 0 6px #ffb642; animation: mailPipPulse 1.6s ease-in-out infinite; }
+        @keyframes mailPipPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }

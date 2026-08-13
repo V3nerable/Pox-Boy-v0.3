@@ -840,6 +840,7 @@
             document.getElementById('dev-controls').style.display = (tabId === 'stat' && currentStatTab === 'stats') ? 'flex' : 'none';
             
             document.getElementById('map-controls').style.display = (tabId === 'map' && isDev) ? 'flex' : 'none';
+            const mcc = document.getElementById('map-cam-controls'); if (mcc) mcc.style.display = (tabId === 'map') ? 'flex' : 'none'; // v0.55: all-player camera row
             const addMarkerBtn = document.getElementById('dev-add-marker-btn');
             const remMarkerBtn = document.getElementById('dev-remove-marker-btn');
             if (addMarkerBtn) addMarkerBtn.style.display = isDev ? 'inline-block' : 'none';
@@ -852,6 +853,7 @@
                 if (currentDataTab === 'quests') renderQuests();
                 if (currentDataTab === 'factions') renderFactions();
                 if (currentDataTab === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
+                if (currentDataTab === 'contracts') renderContracts(); // v0.55: ISSUE QUEST button must re-gate with dev mode
             }
             if (tabId === 'map') {
                 // Leaflet needs to calculate size AFTER display block is applied
@@ -1677,22 +1679,15 @@
                 document.getElementById('add-faction-modal').style.display = 'flex';
             } else if (pendingAuthAction === 'EDIT' || pendingAuthAction === 'EDIT_SPECIFIC') {
                 closeModals();
-                const select = document.getElementById('fac-edit-select');
-                select.innerHTML = '';
+                const select = document.getElementById('fac-edit-select'); // v0.55: now a themed picker input
                 if (factions.length === 0) {
-                    select.innerHTML = '<option value="">NO FACTIONS</option>';
+                    facEditId = null;
+                    select.value = 'NO FACTIONS ON FILE';
                     populateEditFaction();
                 } else {
-                    factions.forEach(f => {
-                        const opt = document.createElement('option');
-                        opt.value = f.id;
-                        opt.innerText = f.name;
-                        select.appendChild(opt);
-                    });
-                    
-                    if (pendingAuthAction === 'EDIT_SPECIFIC') {
-                        select.value = pendingRepId;
-                    }
+                    const wantId = parseInt(pendingRepId, 10);
+                    facEditId = (pendingAuthAction === 'EDIT_SPECIFIC' && factions.some(f => f.id === wantId)) ? wantId : factions[0].id;
+                    select.value = (factions.find(f => f.id === facEditId).name || 'UNKNOWN').toUpperCase();
                     populateEditFaction();
                 }
                 document.getElementById('edit-faction-modal').style.display = 'flex';
@@ -1713,8 +1708,24 @@
             closeModals();
         }
 
+        // v0.55: which faction the editor is pointed at (themed picker replaced the select)
+        let facEditId = null;
+        function pickFactionToEdit() {
+            if (!factions.length) { showNotification('NO FACTIONS ON FILE.'); return; }
+            const buttons = factions.map(f => ({
+                label: (f.name || 'UNKNOWN').toUpperCase(),
+                action: () => {
+                    facEditId = f.id;
+                    document.getElementById('fac-edit-select').value = (f.name || 'UNKNOWN').toUpperCase();
+                    populateEditFaction();
+                }
+            }));
+            buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
+            showCustomPrompt('EDIT WHICH FACTION?', buttons);
+        }
+
         function populateEditFaction() {
-            const id = parseInt(document.getElementById('fac-edit-select').value, 10);
+            const id = facEditId; // v0.55
             const f = factions.find(fac => fac.id === id);
             if (f) {
                 document.getElementById('edit-fac-name').value = f.name;
@@ -1732,7 +1743,7 @@
         }
 
         function saveEditFaction() {
-            const id = parseInt(document.getElementById('fac-edit-select').value, 10);
+            const id = facEditId; // v0.55
             const f = factions.find(fac => fac.id === id);
             if (f) {
                 f.name = (document.getElementById('edit-fac-name').value.trim() || 'UNKNOWN FACTION').toUpperCase();
@@ -1749,7 +1760,8 @@
         }
 
         function deleteFaction() {
-            const id = parseInt(document.getElementById('fac-edit-select').value, 10);
+            if (facEditId === null) { showNotification('PICK A FACTION FIRST.'); return; } // v0.55
+            const id = facEditId;
             factions = factions.filter(fac => fac.id !== id);
             saveToStorage();
             if (currentDataTab === 'factions') renderFactions();
@@ -1924,17 +1936,32 @@
             document.getElementById('action-modal').style.display = 'flex';
         }
         function openAddModal() { document.getElementById('add-name').value = ''; document.getElementById('add-modal').style.display = 'flex'; }
-        function openAddQuestModal() { 
-            document.getElementById('q-name').value = ''; 
-            const giverSelect = document.getElementById('q-giver');
-            giverSelect.innerHTML = '<option value="UNKNOWN WASTELANDER">UNKNOWN WASTELANDER</option>';
-            factions.forEach(f => {
-                const opt = document.createElement('option');
-                opt.value = f.name;
-                opt.innerText = f.name;
-                giverSelect.appendChild(opt);
-            });
-            document.getElementById('add-quest-modal').style.display = 'flex'; 
+        function openAddQuestModal() {
+            document.getElementById('q-name').value = '';
+            // v0.55: selects became themed prompt pickers; defaults ride state vars
+            qTypeVal = 'MAIN'; document.getElementById('q-type').value = 'MAIN QUEST';
+            qGiverVal = 'UNKNOWN WASTELANDER'; document.getElementById('q-giver').value = 'UNKNOWN WASTELANDER';
+            document.getElementById('add-quest-modal').style.display = 'flex';
+        }
+
+        // v0.55: quest composer pickers -- themed prompts, no native dropdown chrome
+        let qTypeVal = 'MAIN';
+        let qGiverVal = 'UNKNOWN WASTELANDER';
+        function pickQuestType() {
+            showCustomPrompt('QUEST CLASSIFICATION?', [
+                { label: 'MAIN QUEST', action: () => { qTypeVal = 'MAIN'; document.getElementById('q-type').value = 'MAIN QUEST'; } },
+                { label: 'SIDE QUEST', action: () => { qTypeVal = 'SIDE'; document.getElementById('q-type').value = 'SIDE QUEST'; } },
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+        function pickQuestGiver() {
+            const buttons = factions.map(f => ({
+                label: (f.name || 'UNKNOWN').toUpperCase(),
+                action: () => { qGiverVal = f.name; document.getElementById('q-giver').value = (f.name || 'UNKNOWN').toUpperCase(); }
+            }));
+            buttons.unshift({ label: 'UNKNOWN WASTELANDER', action: () => { qGiverVal = 'UNKNOWN WASTELANDER'; document.getElementById('q-giver').value = 'UNKNOWN WASTELANDER'; } });
+            buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
+            showCustomPrompt('CONTRACT ISSUER (GIVEN BY)?', buttons);
         }
         
         let tempWpLat = null;
@@ -1953,20 +1980,18 @@
             document.getElementById('add-waypoint-modal').style.display = 'flex';
         }
 
+        // v0.55: native <select> purged -- a themed picker lists your markers instead.
         function openRemoveWaypointModal() {
-            const select = document.getElementById('wp-remove-select');
-            select.innerHTML = '';
-            if (waypoints.length === 0) {
-                select.innerHTML = '<option value="">NO MARKERS TO REMOVE</option>';
-            } else {
-                waypoints.forEach(wp => {
-                    const opt = document.createElement('option');
-                    opt.value = wp.id;
-                    opt.innerText = wp.name;
-                    select.appendChild(opt);
-                });
-            }
-            document.getElementById('remove-waypoint-modal').style.display = 'flex';
+            if (!waypoints.length) { showNotification('NO MARKERS TO REMOVE.'); return; }
+            const buttons = waypoints.map(wp => ({
+                label: '✖ ' + wp.name.toUpperCase(),
+                action: () => showCustomPrompt('REMOVE MARKER "' + wp.name.toUpperCase() + '" FROM THIS UNIT\'S MAP?', [
+                    { label: 'REMOVE IT', color: '#ff3333', action: () => deleteWaypointById(wp.id) },
+                    { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+                ])
+            }));
+            buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
+            showCustomPrompt('REMOVE WHICH MAP MARKER?', buttons);
         }
         
         function closeModals() { 
@@ -2216,8 +2241,8 @@
                 let newQuest = {
                     id: Date.now(),
                     name: (document.getElementById('q-name').value || 'UNKNOWN QUEST').toUpperCase(),
-                    type: document.getElementById('q-type').value,
-                    giver: document.getElementById('q-giver').value,
+                    type: qTypeVal,   // v0.55: themed picker state
+                    giver: qGiverVal, // v0.55: themed picker state
                     location: (document.getElementById('q-loc').value || 'UNKNOWN').toUpperCase(),
                     timeStr: displayTime,
                     expireTime: expireTimestamp,
@@ -2279,13 +2304,20 @@
                 return;
             }
             
-            // Initialize map centered on Perth (or first waypoint)
-            const initialCenter = waypoints.length > 0 ? [waypoints[0].lat, waypoints[0].lng] : [-31.9505, 115.8605];
-            
+            // v0.55: NO forced homes -- the map reopens on the view YOU left (persisted on
+            // every moveend). First-ever open falls back to the waypoint frame / Perth.
+            let savedView = null;
+            try { savedView = JSON.parse(localStorage.getItem('pipboy-mapview') || 'null'); } catch (e) {}
+            const initialCenter = (savedView && savedView.c) ? savedView.c : (waypoints.length > 0 ? [waypoints[0].lat, waypoints[0].lng] : [-31.9505, 115.8605]);
+            const initialZoom = (savedView && savedView.z) ? savedView.z : 14;
+
             pipMap = L.map('map-container', {
                 zoomControl: true,
                 attributionControl: true
-            }).setView(initialCenter, 14);
+            }).setView(initialCenter, initialZoom);
+            pipMap.on('moveend', () => { // remember the commander's last gaze
+                try { localStorage.setItem('pipboy-mapview', JSON.stringify({ c: [pipMap.getCenter().lat, pipMap.getCenter().lng], z: pipMap.getZoom() })); } catch (e) {}
+            });
 
             // Using CartoDB Dark Matter (Free, no API key needed) and styling it with CSS filters
             L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -2472,11 +2504,24 @@
                     .addTo(markersGroup);
             });
             
-            // Re-center map to fit all markers if there are any
-            if (waypoints.length > 0) {
-                const group = new L.featureGroup(waypoints.map(wp => L.marker([wp.lat, wp.lng])));
-                pipMap.fitBounds(group.getBounds().pad(0.2));
-            }
+            // v0.55: waypoint re-renders no longer re-frame the camera. Explicit camera
+            // orders live in mapGoMe()/mapFitAll() below, wired to the MAP tab buttons.
+        }
+
+        // v0.55: explicit camera commands (were autopilot yanks before).
+        function mapGoMe() {
+            if (!pipMap) return;
+            if (myLastLat === null || myLastLng === null) { showNotification('NO POSITION FIX -- ENABLE GPS TRACKING.'); return; }
+            pipMap.setView([myLastLat, myLastLng], Math.max(pipMap.getZoom(), 16));
+        }
+        function mapFitAll() {
+            if (!pipMap) return;
+            const pts = [];
+            waypoints.forEach(wp => pts.push([wp.lat, wp.lng]));
+            Object.keys(lastKnownSharedPins || {}).forEach(k => { const p = lastKnownSharedPins[k]; if (p && typeof p.lat === 'number' && typeof p.lng === 'number') pts.push([p.lat, p.lng]); });
+            if (myLastLat !== null && myLastLng !== null) pts.push([myLastLat, myLastLng]);
+            if (!pts.length) { showNotification('NOTHING TO FRAME YET.'); return; }
+            pipMap.fitBounds(L.latLngBounds(pts).pad(0.25));
         }
 
         function saveNewWaypoint() {
@@ -2523,16 +2568,9 @@
                 .catch(() => showNotification('BROADCAST FAILED -- MARKER STAYS LOCAL.'));
         }
 
-        function deleteWaypoint() {
-            const selectId = document.getElementById('wp-remove-select').value;
-            if (!selectId) {
-                closeModals();
-                return;
-            }
-            
-            const idToRemove = parseInt(selectId, 10);
+        // v0.55: takes the id directly now (themed picker), the select is gone
+        function deleteWaypointById(idToRemove) {
             waypoints = waypoints.filter(wp => wp.id !== idToRemove);
-            
             saveToStorage();
             if (document.getElementById('tab-map').classList.contains('active')) {
                 renderMarkers();
@@ -2708,7 +2746,7 @@
                     L.DomEvent.stopPropagation(e.originalEvent);
                     selectBeacon(localStorage.getItem('pipboy-uid'));
                 });
-                if (pipMap) pipMap.setView([lat, lng], 16);
+                // v0.55: the dot draws, the camera STAYS -- no more forced zoom-to-face
             } else {
                 userMarker.setLatLng([lat, lng]);
             }
@@ -3931,7 +3969,7 @@
             }
             // v0.47: HOT ZONES — static radiation fields the Overseer drops at a spot.
             // No auto-expiry: they burn until EXTINGUISH (decree-style control).
-            html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:15px 0 10px; opacity:0.8;">ZONES (STATIC, 15M)</h3>';
+            html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:15px 0 10px; opacity:0.8;">ZONES</h3>'; // v0.55: sizes are pickable now, no longer static-15m
             const zKeys = Object.keys(lastKnownRadZones).sort((a, b) => ((lastKnownRadZones[b] || {}).ts || 0) - ((lastKnownRadZones[a] || {}).ts || 0));
             if (!zKeys.length) {
                 html += '<p style="opacity:0.5;">NO ZONES DEPLOYED.</p>';
@@ -3948,40 +3986,40 @@
         }
 
         // v0.50: generic zone writer — both kinds, placed anywhere by map long-press
-        // ('map') or at the Overseer's boots ('me'). Fences are a REAL 15m radius:
-        // L.circle scales with zoom and matches ground truth.
-        function dropZone(kind, lat, lng) {
+        // ('map') or at the Overseer's boots ('me'). v0.55: the Overseer picks the fence
+        // radius at drop time (the rules validator has allowed 5..200 since v0.50).
+        // Fences are REAL metre radii: L.circle scales with zoom and matches ground truth.
+        function dropZone(kind, lat, lng, radius) {
             if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- ZONE NOT TRANSMITTED.'); return; }
+            const r = (typeof radius === 'number' && radius >= 5 && radius <= 200) ? radius : 15;
             const key = 'z' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
             const zone = {
                 label: kind === 'med' ? 'MED ZONE' : 'HOT ZONE',
-                kind: kind, lat: lat, lng: lng, radius: 15, ts: Date.now()
+                kind: kind, lat: lat, lng: lng, radius: r, ts: Date.now()
             };
             window.firebaseSet(window.firebaseRef(window.db, 'radzones/' + key), zone)
-                .then(() => showNotification((kind === 'med' ? 'MED' : 'HOT') + ' ZONE DEPLOYED.'))
+                .then(() => showNotification((kind === 'med' ? 'MED' : 'HOT') + ' ZONE DEPLOYED (' + r + 'M FENCE).'))
                 .catch(() => showNotification('DEPLOY FAILED -- CHECK SIGNAL OR RULES.'));
         }
 
-        function dropHotZone(where) {
+        // v0.55: themed radius picker — replaces the old fixed-15m confirm dialog.
+        function promptZoneRadius(kind, where) {
             if (where === 'me' && (myLastLat === null || myLastLng === null)) { showNotification('NO POSITION FIX -- ENABLE GPS TRACKING FROM THE MAP TAB.'); return; }
             const lat = where === 'map' ? tempWpLat : myLastLat;
             const lng = where === 'map' ? tempWpLng : myLastLng;
-            showCustomPrompt('IRRADIATE THIS SPOT? A ☢ HOT ZONE (15M FIELD) DEPLOYS HERE FOR ALL UNITS AND BURNS UNTIL EXTINGUISHED.', [
-                { label: 'DROP HOT ZONE', color: '#ff3333', action: () => dropZone('hot', lat, lng) },
-                { label: 'CANCEL', color: 'var(--pip-color-dim)' }
+            const med = kind === 'med';
+            const tint = med ? '#5fc98e' : '#ff3333';
+            const mk = r => ({ label: r + 'M FENCE', color: tint, action: () => dropZone(kind, lat, lng, r) });
+            showCustomPrompt((med ? 'SANCTIFY' : 'IRRADIATE') + ' THIS SPOT? ' + (med ? 'A ✚ MED ZONE' : 'A ☢ HOT ZONE') + ' DEPLOYS FOR ALL UNITS UNTIL EXTINGUISHED. PICK THE FENCE RADIUS:', [
+                mk(10), mk(15), mk(25), mk(50), mk(100),
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
             ]);
         }
 
+        function dropHotZone(where) { promptZoneRadius('hot', where); } // v0.55: sized drops
+
         // v0.50: the healing counterpart — −5 rads/min inside instead of the wasteland's 1
-        function dropMedZone(where) {
-            if (where === 'me' && (myLastLat === null || myLastLng === null)) { showNotification('NO POSITION FIX -- ENABLE GPS TRACKING FROM THE MAP TAB.'); return; }
-            const lat = where === 'map' ? tempWpLat : myLastLat;
-            const lng = where === 'map' ? tempWpLng : myLastLng;
-            showCustomPrompt('SANCTIFY THIS SPOT? A ✚ MED ZONE (15M) DEPLOYS HERE: ANYONE INSIDE SHEDS 5 RADS PER MINUTE UNTIL EXTINGUISHED.', [
-                { label: 'DROP MED ZONE', color: '#5fc98e', action: () => dropZone('med', lat, lng) },
-                { label: 'CANCEL', color: 'var(--pip-color-dim)' }
-            ]);
-        }
+        function dropMedZone(where) { promptZoneRadius('med', where); } // v0.55: sized drops
 
         // v0.51: reachable from the STATS panel AND the map zone card; copy is
         // kind-aware (it always said HOT ZONE before, even for ✚ MED zones).
@@ -4350,7 +4388,12 @@
             const n = Object.keys(inboxLetters).length;
             const u = Object.keys(unverifiedLetters).length;
             const k = Object.keys(linkScans).length; // v0.45: parked link requests count too
-            el.innerText = 'MAIL' + (n ? ' (' + n + ')' : '') + (u ? ' (' + u + '?)' : '') + (k ? ' (' + k + ' LINK' + (k > 1 ? 'S' : '') + ')' : '');
+            const counts = (n ? ' (' + n + ')' : '') + (u ? ' (' + u + '?)' : '') + (k ? ' (' + k + ' LINK' + (k > 1 ? 'S' : '') + ')' : '');
+            // v0.55: pulsing amber envelope when anything waits; plain text when quiet
+            if (n + u + k > 0) el.innerHTML = '<span class="mail-pip">✉</span> MAIL' + counts;
+            else el.innerText = 'MAIL';
+            // v0.55: home-screen icon badge mirrors the waiting count (installed PWAs)
+            try { if ('setAppBadge' in navigator) { if (n + u + k > 0) navigator.setAppBadge(n + u + k).catch(() => {}); else navigator.clearAppBadge().catch(() => {}); } } catch (e) {}
         }
 
         function renderWastelanders() {
@@ -4438,12 +4481,16 @@
         function renderContracts() {
             const el = document.getElementById('contracts-list');
             if (!el) return;
+            // v0.55: [+ ISSUE NEW QUEST] rides the contracts desk (Overseer-only)
+            const issueBtn = (localStorage.getItem('pipboy-dev-mode') === 'true')
+                ? '<button class="pip-btn" onclick="issueQuestStart()" style="width: 100%; border-style: dashed; margin-bottom: 10px;">[☢ + ISSUE NEW QUEST]</button>'
+                : '';
             const given = outbox.filter(e => e.type === 'quest');
             if (!given.length) {
-                el.innerHTML = '<p style="opacity:0.5;">NO CONTRACTS ISSUED. SEND A QUEST TO START ONE.</p>';
+                el.innerHTML = issueBtn + '<p style="opacity:0.5;">NO CONTRACTS ISSUED. SEND A QUEST TO START ONE.</p>';
                 return;
             }
-            el.innerHTML = '';
+            el.innerHTML = issueBtn;
             [...given].reverse().forEach(e => {
                 const c = contactByUid(e.to);
                 const terminal = (e.status === 'accepted' || e.status === 'declined' || e.status === 'fulfilled' || e.status === 'closed');
@@ -4905,15 +4952,19 @@
 
         // v0.38: SEND NEW MESSAGE straight from the MAIL tab -- lists every linked
         // contact (rolodex) as recipient buttons; tap one and the composer opens.
-        function openRecipientPicker() {
+        function openRecipientPicker(kind) {
+            kind = kind || 'msg';
             if (!rolodex.length) { showNotification('NO CONTACTS LINKED -- SCAN A DATACARD FIRST.'); return; }
             const buttons = rolodex.map(c => ({
-                label: '✉ ' + c.name,
-                action: () => composeTo('msg', c.uid)
+                label: (kind === 'quest' ? '☢ ' : '✉ ') + c.name,
+                action: () => composeTo(kind, c.uid)
             }));
             buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
-            showCustomPrompt('SELECT RECIPIENT:', buttons);
+            showCustomPrompt(kind === 'quest' ? 'ISSUE CONTRACT TO:' : 'SELECT RECIPIENT:', buttons);
         }
+
+        // v0.55: [+ ISSUE NEW QUEST] on DATA > CONTRACTS -- pick a wastelander, land in the composer
+        function issueQuestStart() { openRecipientPicker('quest'); }
 
         function renderMail() {
             const el = document.getElementById('mail-container');
@@ -4930,7 +4981,7 @@
             const uKeys = Object.keys(unverifiedLetters).sort((a, b) => (unverifiedLetters[b].ts || 0) - (unverifiedLetters[a].ts || 0));
             const lsKeys = Object.keys(linkScans).sort((a, b) => (linkScans[b].ts || 0) - (linkScans[a].ts || 0)); // v0.45: parked link scans
             if (inKeys.length || uKeys.length || lsKeys.length) {
-                html += '<h3 style="border-bottom:2px solid var(--pip-color); padding-bottom:5px; margin-bottom:10px;">⚠ ACTION REQUIRED</h3>';
+                html += '<h3 style="border-bottom:2px solid #ff3333; padding-bottom:5px; margin-bottom:10px; color:#ff3333; text-shadow:0 0 6px #ff3333;">⚠ ACTION REQUIRED</h3>'; // v0.55: blood-red per user
                 inKeys.forEach(k => {
                     const l = inboxLetters[k];
                     html += '<div class="item-row" onclick="openMailItem(\'' + k + '\')"><div class="item-info"><div>↓ ' + escapeHtml(typeSummary(l)) + '</div><div class="item-effects">FROM: ' + escapeHtml(l.fromName || 'UNKNOWN') + ' — ' + timeOf(l.ts) + ' — TAP TO RESPOND</div></div><div class="item-qty">&gt;</div></div>';
@@ -5023,7 +5074,7 @@
         function statusLabel(e) {
             switch (e.status) {
                 case 'queued': return 'QUEUED (NO SIGNAL)';
-                case 'sending': return 'TRANSMITTING...';
+                case 'sending': return 'QUEUED ON THIS UNIT -- SHIPS WHEN OPEN IN SIGNAL'; // v0.55: honest ownership copy
                 case 'sent': return 'AWAITING RESPONSE';
                 case 'accepted': return 'ACCEPTED ✓';
                 case 'declined': return e.refunded ? 'DECLINED ✗ (RETURNED)' : 'DECLINED ✗';
@@ -5206,6 +5257,10 @@
         }
         window.addEventListener('online', () => { flushOutbox(); refreshOutboxStatuses(); });
         setInterval(() => { flushOutbox(); refreshOutboxStatuses(); }, 20000);
+        // v0.55: wake-and-ship -- when the app returns from sleep/backgound, flush any
+        // letters Android froze mid-send (root cause of the "7-minute quest" report).
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) { flushOutbox(); refreshOutboxStatuses(); } });
+        window.addEventListener('pageshow', () => { flushOutbox(); refreshOutboxStatuses(); });
 
         // ========================= POX RADIO (v0.53) =========================
         // Three looping dials from radio-stations.json (precached app file). Audio lives
