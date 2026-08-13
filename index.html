@@ -54,9 +54,10 @@
         <div style="display: flex; flex-direction: column;">
             <div style="display: flex; align-items: baseline; gap: 10px;">
                 <span class="header-title" id="main-os-title">POX-BOY 3026</span>
-                <span style="font-size: 0.8rem; opacity: 0.5;">v0.55</span>
+                <span style="font-size: 0.8rem; opacity: 0.5;">v0.56</span>
             </div>
             <span id="pip-clock" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px;"></span>
+            <span id="hud-radio" style="font-size: 0.95rem; margin-top: 2px; margin-right: 7px; display: none; text-shadow: 0 0 5px currentColor;">♪</span><span id="hud-sat" style="font-size: 0.95rem; margin-top: 2px; margin-right: 7px; opacity: 0.3; color: var(--pip-color-dim); text-shadow: 0 0 5px currentColor;">⌖</span>
             <span id="pip-batt" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px; display: none;"></span>
         </div>
         <div class="header-controls">
@@ -64,6 +65,9 @@
     </div>
 
     <!-- MAIN NAVIGATION -->
+    <!-- v0.56: Overseer wire banner -- persists under the header until dismissed -->
+    <div id="wire-banner" onclick="dismissWire()" style="display: none; position: relative; border: 2px dashed #ffb642; color: #ffb642; text-shadow: 0 0 6px #ffb642; padding: 8px 34px 8px 10px; margin: 4px 10px; font-size: 0.95rem; cursor: pointer; background: rgba(20, 12, 0, 0.6);">📣 <span id="wire-banner-text"></span><span style="position: absolute; right: 10px; top: 7px; opacity: 0.75;">[X]</span></div>
+
     <div class="nav-tabs">
         <div class="nav-item active" onclick="switchMainTab('stat')">STAT</div>
         <div class="nav-item" id="mail-navitem" onclick="switchMainTab('mail')">MAIL</div>
@@ -195,12 +199,13 @@
                 <!-- v0.45: per-category transmission alert switches (toast + OS ping each) -->
                 <button class="pip-btn" id="options-nmsg-btn" onclick="cycleNotify('msg','options-nmsg-btn','MESSAGES')" style="border-style: dashed;">[NOTIFY MESSAGES: ON]</button>
                 <button class="pip-btn" id="options-ncon-btn" onclick="cycleNotify('contract','options-ncon-btn','CONTRACTS')" style="border-style: dashed;">[NOTIFY CONTRACTS: ON]</button>
+                <button class="pip-btn" id="options-wire-btn" onclick="cycleWireAlerts()" style="border-style: dashed;">[WIRE ALERTS: ON]</button>
                 <button class="pip-btn" id="options-nlnk-btn" onclick="cycleNotify('link','options-nlnk-btn','LINKS')" style="border-style: dashed;">[NOTIFY LINKS: ON]</button>
                 <!-- v0.48: haptics master — UI toasts no longer push to the OS at all -->
                 <button class="pip-btn" id="options-vibrate-btn" onclick="cycleVibrate()" style="border-style: dashed;">[VIBRATE: ON]</button>
                 <!-- v0.52: privacy decoy — other units see your dot at the decoy site, your unit keeps the real fix -->
                 <button class="pip-btn" id="options-scrambler-btn" onclick="toggleScrambler()" style="border-style: dashed; border-color: #ffb642; color: #ffb642;">[BEACON SCRAMBLER: OFF]</button>
-                <p style="font-size: 0.9rem; opacity: 0.7; margin-top: 15px; line-height: 1.4;">PADDING cycles MAX / SHRINK 1 / SHRINK 2 and persists. THEME tints the phosphor, map and optics. AUTO-EXPORT also files every shot to your gallery-indexed download folder the moment it's taken. MAIL PING buzzes the OS on new transmissions (silent while you're already reading mail). TEXT cycles font size NORMAL / LARGE / XL and persists. THIS UNIT IS PORTRAIT-ONLY: the display re-aligns itself automatically on any device that lets it. FULLSCREEN works on any device that supports it — on iPhone it lives behind "ADD TO HOME SCREEN" instead. Hidden when the OS already locks immersion. NOTIFY MESSAGES / CONTRACTS / LINKS choose which transmission alerts toast and ping — LINKS off parks datacard scans quietly as a MAIL tab row. BEACON SCRAMBLER makes every other unit see your dot at a fixed decoy site (long-press the map > SET DECOY SITE to move it) — handy for pre-event testing; your own rads, zones and healing still run off your REAL position. Long messages: the keyboard field stretches as you type (ENTER still commits), and tapping any TRANSMISSIONS row opens the full text with its photo.</p>
+                <p style="font-size: 0.9rem; opacity: 0.7; margin-top: 15px; line-height: 1.4;">PADDING cycles MAX / SHRINK 1 / SHRINK 2 and persists. THEME tints the phosphor, map and optics. AUTO-EXPORT also files every shot to your gallery-indexed download folder the moment it's taken. MAIL PING buzzes the OS on new transmissions (silent while you're already reading mail). TEXT cycles font size NORMAL / LARGE / XL and persists. THIS UNIT IS PORTRAIT-ONLY: the display re-aligns itself automatically on any device that lets it. FULLSCREEN works on any device that supports it — on iPhone it lives behind "ADD TO HOME SCREEN" instead. Hidden when the OS already locks immersion. NOTIFY MESSAGES / CONTRACTS / LINKS choose which transmission alerts toast and ping — LINKS off parks datacard scans quietly as a MAIL tab row. BEACON SCRAMBLER makes every other unit see your dot at a fixed decoy site (long-press the map > SET DECOY SITE to move it) — handy for pre-event testing; your own rads, zones and healing still run off your REAL position. Long messages: the keyboard field stretches as you type (ENTER still commits), and tapping any TRANSMISSIONS row opens the full text with its photo. WIRE ALERTS push OVERSEER announcements to this device's OS notices; the amber banner up top carries the latest wire until you tap it away. The two header glyphs are your signal strip: ♪ = radio live (amber when synced), ⌖ = satellite lock (amber locked, red-blink holding, dim off).</p>
             </div>
 
             <!-- CONTRACTS (v0.44): quests YOU issued, with live recipient statuses -->
@@ -245,6 +250,8 @@
             <div class="split-view">
                 <div class="split-main" style="position: relative;">
                     <div id="map-container"></div>
+                    <!-- v0.56: live signal census -- the empty-map question now has a number -->
+                    <div id="map-signals" style="position: absolute; top: 6px; left: 6px; z-index: 800; font-size: 0.75rem; padding: 2px 8px; border: 1px dashed var(--pip-color-dim); background: rgba(5,16,5,0.85); opacity: 0.9;">SIGNALS: --</div>
                     <!-- Sticky-select wastelander info card (tap a beacon) -->
                     <div id="map-user-card" style="display: none; position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 1000; background: rgba(5, 16, 5, 0.95); border: 2px solid var(--pip-color); box-shadow: 0 0 12px var(--pip-color-dim); padding: 10px;">
                         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -465,10 +472,22 @@
                  from the LOADOUT can ride the letter -->
             <div style="display:flex; gap:8px; margin-bottom:10px;">
                 <button class="pip-btn" id="cm-photo-btn" onclick="attachComposerPhoto()" style="flex:1; border-style:dashed; font-size:1rem; margin:0;">[+ PHOTO]</button>
+                <button class="pip-btn" onclick="quickCamOpen()" style="flex:1; border-style:dashed; font-size:1rem; margin:0;">[📷 SNAP NOW]</button>
             </div>
             <div id="cm-attach-note" style="display:none; font-size:1rem; opacity:0.8; margin-bottom:8px;"></div>
             <button class="pip-btn" onclick="transmitMsg()">[ SEND TRANSMISSION ]</button>
             <button class="pip-btn" onclick="closeModals()" style="margin-top: 15px; border-style: dashed;">CANCEL</button>
+        </div>
+    </div>
+
+    <!-- v0.56: in-composer quick capture (snap a shot straight into the draft) -->
+    <div id="quickcam-modal" class="modal-overlay" style="z-index: 140;">
+        <div class="modal-content" style="text-align: center;">
+            <h3>QUICK CAPTURE</h3>
+            <video id="qc-video" autoplay playsinline muted style="width: 100%; max-height: 50vh; border: 2px solid var(--pip-color); margin-bottom: 10px; background: #000;"></video>
+            <canvas id="qc-canvas" style="display: none;"></canvas>
+            <button class="pip-btn" onclick="quickCamSnap()">[ ◉ SNAP + ATTACH ]</button>
+            <button class="pip-btn" onclick="quickCamClose()" style="margin-top: 10px; border-style: dashed;">CANCEL</button>
         </div>
     </div>
 
@@ -842,7 +861,7 @@
     <div id="pre-boot-overlay" class="modal-overlay" style="z-index: 250; background: var(--pip-bg); flex-direction: column; display: none;">
         <!-- Version Tag & Dev Skip Button -->
         <div style="position: absolute; top: 10px; right: 10px; z-index: 260; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-            <span style="font-size: 0.8rem; opacity: 0.5;">v0.55</span>
+            <span style="font-size: 0.8rem; opacity: 0.5;">v0.56</span>
             <button class="pip-btn" onclick="devSkipToApp()" style="font-size: 0.7rem; padding: 2px 5px; border: none; color: #ff3333; opacity: 0.5;">[DEV: FAST BOOT]</button>
         </div>
         
@@ -864,7 +883,7 @@
 
     <!-- BOOT SPLASH SCREEN -->
     <div id="boot-splash" class="modal-overlay" style="z-index: 200; background: var(--pip-bg); flex-direction: column; display: flex;">
-        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.55</span>
+        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.56</span>
         <div class="crt" style="position: absolute; top:0; left:0; right:0; bottom:0; pointer-events: none; z-index: 201;"></div>
         <div style="z-index: 202; width: 100%; max-width: 600px; padding: 20px; text-align: left; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; justify-content: flex-end;" id="boot-text-container">
             <p id="boot-log-1" style="margin-bottom: 5px; display: none; font-size: 1rem;">ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM</p>

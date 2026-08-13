@@ -476,3 +476,7 @@ html.plock-90 #pre-boot-box,  html.plock-270 #pre-boot-box  { max-height: 96vw !
         /* v0.55: pulsing mail envelope on the MAIL nav tab when transmissions wait */
         .mail-pip { color: #ffb642; text-shadow: 0 0 6px #ffb642; animation: mailPipPulse 1.6s ease-in-out infinite; }
         @keyframes mailPipPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        /* v0.56: blinking HUD warning glyph (satellite unstable -- holding last fix) */
+        .hud-blink { animation: hudBlink 0.9s steps(2, start) infinite; }
+        @keyframes hudBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }

@@ -1340,6 +1340,26 @@
             if (b && localStorage.getItem('pipboy-vibrate') === '0') b.innerText = '[VIBRATE: OFF]';
         })();
 
+        // --- v0.56: HEADER HUD GLYPHS (state icons instead of toast chatter) ---
+        // sat glyph: dim = off | amber = locked | red blink = unstable-holding.
+        // radio glyph: absent = off | phosphor = free-run | amber = LIVE-synced train.
+        function updateHud() {
+            const sat = document.getElementById('hud-sat');
+            if (sat) {
+                const live = gpsWatchId !== null;
+                const unstable = live && (Date.now() - lastFixAt > 90000);
+                sat.style.opacity = live ? '1' : '0.3';
+                sat.style.color = unstable ? '#ff3333' : (live ? '#ffb642' : 'var(--pip-color-dim)');
+                sat.classList.toggle('hud-blink', !!unstable);
+            }
+            const rad = document.getElementById('hud-radio');
+            if (rad) {
+                const on = !!radioCur;
+                rad.style.display = on ? '' : 'none';
+                if (on) rad.style.color = radioIsSynced(radioCur) ? '#ffb642' : 'var(--pip-color)';
+            }
+        }
+
         // Android Chrome THROWS on `new Notification()` from a page (illegal constructor) --
         // native notifications must go through the ServiceWorker registration there.
         // This helper is fully defensive: it can never break the in-app modal above.
@@ -2331,7 +2351,7 @@
             });
 
             // Tapping empty map clears the sticky selection (beacon OR zone, v0.51)
-            pipMap.on('click', function() { if (selectedBeaconUid || selectedZoneKey) deselectBeacon(); });
+            pipMap.on('click', function() { if (selectedBeaconUid || selectedZoneKey || selectedPinKey) deselectBeacon(); });
 
             markersGroup = L.layerGroup().addTo(pipMap);
             otherPlayersGroup = L.layerGroup().addTo(pipMap);
@@ -2341,6 +2361,7 @@
             // v0.52: if GPS auto-armed before the map ever initialised, our dot was
             // deferred (no markersGroup to draw into) -- draw it now.
             if (gpsWatchId !== null && myLastLat !== null && myLastLng !== null && !userMarker) ensureUserMarker(myLastLat, myLastLng);
+            else if (!userMarker && myLastLat !== null && myLastLng !== null) ensureUserMarker(myLastLat, myLastLng, true); // v0.56: cold-persisted dot
             // v0.53 ZONE FIX (user: "zones disappeared from the map but still in the remove
             // list"): radzones/ fires at comms boot, mapless, so its first emission was
             // guard-swallowed and nothing EVER re-rendered zones on map open -- they only
@@ -2354,7 +2375,8 @@
                     otherPlayersGroup.clearLayers();
                     const data = snapshot.val();
                     lastKnownBeaconData = data || {}; // sticky-select card + rolodex presence read from this
-                    if (!data) { if (selectedBeaconUid) updateMapUserCard(); return; }
+                    const myUid = localStorage.getItem('pipboy-uid');
+                    let liveN = 0, drawnN = 0; // v0.56: SIGNALS census
 
                     const otherPlayerIcon = L.divIcon({
                         className: 'custom-pip-marker',
@@ -2362,41 +2384,58 @@
                         iconSize: [14, 14],
                         iconAnchor: [7, 7]
                     });
+                    // v0.56: cold dots ghost instead of impersonating live ones (stale intel FADES)
+                    const otherPlayerIconCold = L.divIcon({
+                        className: 'custom-pip-marker',
+                        html: `<div style="background-color: transparent; width: 14px; height: 14px; border-radius: 50%; border: 2px dashed var(--pip-color-dim); opacity: 0.6;"></div>`,
+                        iconSize: [14, 14],
+                        iconAnchor: [7, 7]
+                    });
 
-                    const myUid = localStorage.getItem('pipboy-uid');
-
-                    for (let uid in data) {
+                    if (data) for (let uid in data) {
                         if (uid === myUid) continue; // Don't draw ourselves twice
 
                         const p = data[uid];
+                        if (!p) continue;
 
                         // Skip any beacon older than 24 hours (keeps the radar map clean)
                         if (!p.timestamp || (Date.now() - p.timestamp) > 24 * 60 * 60 * 1000) continue;
 
+                        // v0.56: one rotten beacon record could throw mid-loop and black out EVERY
+                        // dot on this unit (roster/zones kept rendering) -- guard per-beacon
+                        const plat = (typeof p.lat === 'number') ? p.lat : parseFloat(p.lat);
+                        const plng = (typeof p.lng === 'number') ? p.lng : parseFloat(p.lng);
+                        if (!isFinite(plat) || !isFinite(plng)) continue;
+
                         // Calculate how old this data is
                         const ageInMinutes = Math.floor((Date.now() - p.timestamp) / 60000);
-                        let nameLabel = p.name;
+                        let nameLabel = String(p.name || 'WASTELANDER');
 
                         // If the data is older than 5 minutes, mark them as 'Last Known Location'
                         if (ageInMinutes > 5) {
                             nameLabel += ` (LKL: ${ageInMinutes}m ago)`;
-                        }
+                        } else liveN++;
+                        drawnN++;
 
-                        const pMarker = L.marker([p.lat, p.lng], {icon: otherPlayerIcon, zIndexOffset: 900})
-                            .bindTooltip(nameLabel, {
-                                permanent: false,
-                                direction: 'top',
-                                className: 'pip-tooltip'
-                            })
-                            .addTo(otherPlayersGroup);
-                        // v0.31 sticky-select: tap a beacon to pin their info card
-                        pMarker.on('click', (e) => {
-                            L.DomEvent.stopPropagation(e.originalEvent);
-                            selectBeacon(uid);
-                        });
+                        try {
+                            const pMarker = L.marker([plat, plng], {icon: ageInMinutes > 5 ? otherPlayerIconCold : otherPlayerIcon, zIndexOffset: 900})
+                                .bindTooltip(nameLabel, {
+                                    permanent: false,
+                                    direction: 'top',
+                                    className: 'pip-tooltip'
+                                })
+                                .addTo(otherPlayersGroup);
+                            // v0.31 sticky-select: tap a beacon to pin their info card
+                            pMarker.on('click', (e) => {
+                                L.DomEvent.stopPropagation(e.originalEvent);
+                                selectBeacon(uid);
+                            });
+                        } catch (e) { drawnN--; }
                     }
+                    updateSignalsChip(liveN, drawnN - liveN); // v0.56: the empty-map question now has a number
                     // Live-refresh the pinned card as beacons stream in
                     if (selectedBeaconUid) updateMapUserCard();
+                    updateHud(); // v0.56
                 });
 
                 // v0.38: watch the shared pins board (read is open to everyone per rules)
@@ -2405,11 +2444,20 @@
             }
         }
 
+        // v0.56: the live signal census chip on the map edge
+        function updateSignalsChip(live, cold) {
+            const el = document.getElementById('map-signals');
+            if (!el) return;
+            el.innerText = 'SIGNALS: ' + live + ' LIVE' + (cold ? ' · ' + cold + ' COLD' : '');
+        }
+
         // v0.38: draw every broadcast marker from every wastelander (72h staleness prune)
+        let pinMarkerRefs = {}; // v0.56
         function renderSharedPins(data) {
             lastKnownSharedPins = data || {};
             if (!sharedPinsGroup) return;
             sharedPinsGroup.clearLayers();
+            pinMarkerRefs = {};
             const now = Date.now();
             const sharedIcon = L.divIcon({
                 className: 'custom-pip-marker',
@@ -2423,14 +2471,18 @@
                 if (p.from && myMailUid && p.from === myMailUid) return; // v0.46: self-echo filter — your LOCAL marker already is your view of your broadcast; the diamond is for everyone else
                 if (!p.ts || (now - p.ts) > 72 * 60 * 60 * 1000) return; // stale: skip
                 const who = p.fromName ? (' — VIA ' + String(p.fromName).toUpperCase()) : '';
-                L.marker([p.lat, p.lng], {icon: sharedIcon, zIndexOffset: 500})
+                const pm = L.marker([p.lat, p.lng], {icon: sharedIcon, zIndexOffset: 500})
                     .bindTooltip(String(p.label || 'SHARED MARKER').toUpperCase() + who, {
-                        permanent: true,
+                        permanent: false, // v0.56: labels reveal on tap only (user)
                         direction: 'bottom',
                         className: 'pip-tooltip'
                     })
                     .addTo(sharedPinsGroup);
+                pm.on('click', (e) => { L.DomEvent.stopPropagation(e.originalEvent); selectSharedPin(key); });
+                pinMarkerRefs[key] = pm;
+                if (key === selectedPinKey) pm.openTooltip(); // keep the label up across board refreshes
             });
+            if (selectedPinKey) updatePinCard(); // auto-deselects if the pin vanished under it
         }
 
         // v0.50: draw every Overseer ZONE — real-radius L.circle fence (scales with zoom,
@@ -2497,7 +2549,7 @@
             waypoints.forEach(wp => {
                 const marker = L.marker([wp.lat, wp.lng], {icon: customIcon})
                     .bindTooltip(wp.name, {
-                        permanent: true, 
+                        permanent: false, // v0.56: labels reveal on tap only (user)
                         direction: 'top', 
                         className: 'pip-tooltip'
                     })
@@ -2625,13 +2677,17 @@
                 gpsWatchId = null;
             }
             localStorage.setItem('pipboy-gps-tracking', '0');
+            updateHud(); // v0.56
             const btn = document.getElementById('gps-btn');
             if (btn) {
                 btn.innerText = "[ENABLE GPS TRACKING]";
                 btn.style.background = "transparent";
                 btn.style.color = "var(--pip-color)";
             }
-            if (userMarker && markersGroup) {
+            // v0.56: GPS OFF no longer erases your dot -- it drops to a ghost at the last fix
+            if (myLastLat !== null && myLastLng !== null && markersGroup) {
+                ensureUserMarker(myLastLat, myLastLng, true);
+            } else if (userMarker && markersGroup) {
                 markersGroup.removeLayer(userMarker);
                 userMarker = null;
             }
@@ -2681,6 +2737,7 @@
             const lng = position.coords.longitude;
             myLastLat = lat; myLastLng = lng; // feeds map wastelander-card distance readout
             lastFixAt = Date.now();
+            try { localStorage.setItem('pipboy-lastfix', JSON.stringify({ lat: lat, lng: lng, ts: lastFixAt })); } catch (e) {} // v0.56: self-dot survives restarts
             evalPariahField(); // field entry/exit on every fresh fix (ticks backstop)
 
             const btn = document.getElementById('gps-btn');
@@ -2689,12 +2746,10 @@
                 btn.style.background = "var(--pip-color-dim)";
                 btn.style.color = "var(--pip-bg)";
             }
-            if (gpsRestoredPending) {
-                gpsRestoredPending = false;
-                showNotification("SATELLITE LINK RESTORED.");
-            }
+            if (gpsRestoredPending) gpsRestoredPending = false; // v0.56: the sat glyph tells it -- no toast
 
             if (markersGroup) ensureUserMarker(lat, lng);
+            updateHud(); // v0.56
 
             // Push live location to Firebase (scrambler may swap in the decoy site)
             pushMyBeacon(lat, lng);
@@ -2731,12 +2786,18 @@
         // v0.39 marker behaviour preserved (plain pip dot, z 800 under other beacons,
         // clickable self-card). Extracted so the MAP tab can restore the dot late when
         // the watch was auto-armed before the map ever initialised.
-        function ensureUserMarker(lat, lng) {
+        let userMarkerCold = false; // v0.56: ghost state of the self-dot
+        function ensureUserMarker(lat, lng, cold) {
             if (!markersGroup) return;
+            if (userMarker && userMarkerCold !== !!cold) { markersGroup.removeLayer(userMarker); userMarker = null; } // restyle on state flip
+            userMarkerCold = !!cold;
             if (!userMarker) {
+                const selfStyle = userMarkerCold
+                    ? 'background-color: transparent; width: 14px; height: 14px; border-radius: 50%; border: 2px dashed var(--pip-color-dim);'
+                    : 'background-color: var(--pip-color); width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--pip-bg); box-shadow: 0 0 10px var(--pip-color);';
                 const userIcon = L.divIcon({
                     className: 'custom-pip-marker',
-                    html: `<div style="background-color: var(--pip-color); width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--pip-bg); box-shadow: 0 0 10px var(--pip-color);"></div>`,
+                    html: `<div style="${selfStyle}"></div>`,
                     iconSize: [14, 14],
                     iconAnchor: [7, 7]
                 });
@@ -2790,7 +2851,18 @@
                 const btn = document.getElementById('gps-btn');
                 if (btn && btn.innerText.indexOf('UNSTABLE') === -1) btn.innerText = "[GPS UNSTABLE -- HOLDING LAST FIX]";
             }
+            updateHud(); // v0.56: keeps the sat glyph honest between fixes
         }, 15000);
+
+        // v0.56: your last fix persists -- your dot is ALWAYS on the map (user: "always")
+        function loadLastFix() { try { return JSON.parse(localStorage.getItem('pipboy-lastfix') || 'null'); } catch (e) { return null; } }
+        function hydrateLastFix() {
+            if (myLastLat !== null) return;
+            const lf = loadLastFix();
+            if (lf && typeof lf.lat === 'number' && typeof lf.lng === 'number') {
+                myLastLat = lf.lat; myLastLng = lf.lng; lastFixAt = lf.ts || 0;
+            }
+        }
 
         // ================= BEACON SCRAMBLER (v0.52) =================
         // Privacy decoy for pre-event testing: YOUR unit keeps its real fix (rads, zones,
@@ -2862,8 +2934,14 @@
             const discoveredCount = waypoints.filter(wp => wp.discovered).length;
             const container = document.getElementById('stats-general');
             if (container) {
+                // v0.56: the engine testifies -- field state + fix age at a glance, so the
+                // next "I'm not taking rads" report comes with its own evidence attached
+                const fixAge = lastFixAt ? Math.max(0, Math.floor((Date.now() - lastFixAt) / 60000)) : null;
+                const fieldTxt = radFieldActive ? ('INSIDE ' + (radFieldPariah || 'FIELD')) : (medShelterActive ? 'IN MED SHELTER' : 'OPEN WASTES');
+                const fieldColor = radFieldActive ? '#ff3333' : (medShelterActive ? '#5fc98e' : 'inherit');
                 container.innerHTML = `
                     <h2>GENERAL STATS</h2><br>
+                    <p style="color: ${fieldColor};">FIELD STATUS: ${fieldTxt} &middot; LAST FIX ${fixAge === null ? 'NEVER' : fixAge + 'M AGO'}</p>
                     <p>LOCATIONS DISCOVERED: ${discoveredCount}</p>
                     <p>WASTELANDERS MET: ${rolodex.length}</p>
                     <p>DAYS PASSED: 0</p>
@@ -3750,7 +3828,7 @@
                             // v0.45: senders used to get SILENCE when a contract/shipment was
                             // picked up — the feed just flipped quietly. Now it tells you,
                             // gated by NOTIFY CONTRACTS
-                            if (notifyPref('contract')) {
+                            if (notifyPref('contract') && e.type !== 'msg') { // v0.56: plain messages stop ack-pinging the sender (user: "reply is the receipt")
                                 const who = String((contactByUid(e.to) || {}).name || e.to).toUpperCase();
                                 const what = e.type === 'quest' ? 'CONTRACT' : (e.type === 'item' ? 'SHIPMENT' : 'TRANSMISSION');
                                 showNotification(what + ' ACCEPTED BY ' + who);
@@ -3803,6 +3881,8 @@
         let radFieldActive = false; // hysteresis state: currently bathed in a pariah field
         let radFieldPariah = null;  // name of the source, for status purposes
         let medShelterActive = false; // v0.50: inside a ✚ MED ZONE fence (recovery x5)
+        let radFieldRadius = 15;   // v0.56: radius of the field we're standing in (variable fences)
+        let medShelterRadius = 15; // v0.56: radius of the shelter we're standing in
 
         function adjustRads(delta) {
             const before = userProfile.rads || 0;
@@ -3839,26 +3919,30 @@
                     const z = lastKnownRadZones[zk];
                     if (!z || typeof z.lat !== 'number' || typeof z.lng !== 'number') return;
                     const d = getDistance(myLastLat, myLastLng, z.lat, z.lng);
+                    // v0.56 BUGFIX: fences now bite at their REAL radius (v0.55 made radii
+                    // pickable but the engine still hard-coded 15m -- cosmetic-only fences).
+                    const zr = (typeof z.radius === 'number') ? z.radius : 15;
                     if (z.kind === 'med') {
-                        if (nearestMed === null || d < nearestMed) nearestMed = d;
+                        if (nearestMed === null || d < nearestMed.d) nearestMed = { d: d, r: zr };
                         return;
                     }
                     if (!nearest || d < nearest.d) {
-                        nearest = { d: d, name: ('☢ ' + (z.label || 'HOT ZONE')), kind: 'HOT ZONE' };
+                        nearest = { d: d, name: ('☢ ' + (z.label || 'HOT ZONE')), kind: 'HOT ZONE', r: zr };
                     }
                 });
-                // v0.50: med fence shares the no-flicker rule — grab at 15m, release at 18m, silent
-                if (!medShelterActive && nearestMed !== null && nearestMed <= 15) medShelterActive = true;
-                else if (medShelterActive && (nearestMed === null || nearestMed > 18)) medShelterActive = false;
+                // v0.56: med shelter grabs at the zone's own radius, releases 20% past it (15m legacy = grab 15 / release 18, unchanged)
+                if (!medShelterActive && nearestMed !== null && nearestMed.d <= nearestMed.r) { medShelterActive = true; medShelterRadius = nearestMed.r; }
+                else if (medShelterActive && (nearestMed === null || nearestMed.d > medShelterRadius * 1.2)) medShelterActive = false;
                 renderVaultBoyFx(); // overlays repaint on any engine evaluation
             }
-            // Hysteresis: the field GRABS at 15m and RELEASES at 18m — no boundary flicker.
-            // v0.48: entry/exit toasts DELETED per user — the geiger counter is the voice
-            // of the field now; state flips silently.
-            if (!radFieldActive && nearest && nearest.d <= 15) {
+            // Hysteresis: the field GRABS at its radius and RELEASES 20% past it — no boundary
+            // flicker. Pariah fields carry no r -> legacy 15/18. v0.48: entry/exit toasts
+            // DELETED per user — the geiger counter is the voice of the field now.
+            if (!radFieldActive && nearest && nearest.d <= (nearest.r || 15)) {
                 radFieldActive = true;
                 radFieldPariah = nearest.name;
-            } else if (radFieldActive && (!nearest || nearest.d > 18)) {
+                radFieldRadius = nearest.r || 15;
+            } else if (radFieldActive && (!nearest || nearest.d > radFieldRadius * 1.2)) {
                 radFieldActive = false;
                 radFieldPariah = null;
             }
@@ -3925,7 +4009,11 @@
 
         // --- OVERSEER PARIAH CONTROL (STATS tab, dev-mode only) ---
         function renderPariahPanel() {
-            let html = '<h2 style="color:#ff3333;">☢ PARIAH WATCH</h2>';
+            // v0.56: the Overseer's WIRE DESK rides the top of the panel
+            let html = '<h3 style="color:#ffb642; text-shadow:0 0 6px #ffb642; border-bottom:1px dashed #ffb642; padding-bottom:5px;">📣 WIRE DESK</h3>';
+            html += '<div class="form-group"><input type="text" id="wire-text" class="pip-input vk-target" readonly onclick="openVk(\'wire-text\')" placeholder="BROADCAST TO EVERY UNIT (140 CHARS MAX)"></div>';
+            html += '<button class="pip-btn" onclick="sendWire()" style="width:100%; border-style:dashed; border-color:#ffb642; color:#ffb642; margin-bottom:14px;">[📣 TRANSMIT WIRE]</button>';
+            html += '<h2 style="color:#ff3333;">☢ PARIAH WATCH</h2>';
             html += '<p style="font-size:0.95rem; opacity:0.75; line-height:1.4;">MARKED WASTELANDERS RADIATE A 15M FIELD: ANYONE INSIDE TAKES +1 RAD/MIN (ENTRY AT 15M, RELEASE AT 18M). SIGNALS STALE BEYOND 5MIN DO NOT IRRADIATE.</p>';
             const marks = Object.keys(pariahMarks);
             html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:15px 0 10px; opacity:0.8;">DECLARED PARIAHS</h3>';
@@ -4232,11 +4320,13 @@
                 const body = (p.text && p.text !== '📷 PHOTO TRANSMISSION')
                     ? 'MESSAGE FROM ' + from + ': "' + p.text + '"'
                     : from + ' SENT A PHOTO TRANSMISSION.';
-                showCustomPrompt(body + '\n\n' + bits.join('\n'), [
+                const msgBtns = [
                     { label: p.item ? 'LOG + TAKE ITEM' : 'LOG TRANSMISSION', action: () => acceptMsg(key, l) },
                     { label: 'REPLY', action: () => composeTo('msg', safeUid(l.from)) },
-                    { label: 'DELETE', color: '#ff3333', action: () => declineLetter(key) }
-                ]);
+                ];
+                if (p.photo) msgBtns.push({ label: 'SAVE PHOTO', action: () => saveMailPhoto(p.photo) }); // v0.56
+                msgBtns.push({ label: 'DELETE', color: '#ff3333', action: () => declineLetter(key) });
+                showCustomPrompt(body + '\n\n' + bits.join('\n'), msgBtns);
                 if (p.photo) {
                     const img = document.getElementById('cp-img');
                     if (img) { img.src = p.photo; img.style.display = 'block'; } // full transit copy, pre-log
@@ -4604,6 +4694,38 @@
             }
         }
 
+        // --- v0.56: IN-COMPOSER QUICK CAPTURE -- take the shot without leaving the letter ---
+        let qcStream = null;
+        async function quickCamOpen() {
+            try {
+                qcStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: (typeof currentFacingMode !== 'undefined' && currentFacingMode === 'user') ? 'user' : 'environment' }, audio: false });
+            } catch (e) { showNotification('OPTICS UNAVAILABLE -- PERMISSION DENIED OR SENSOR BUSY.'); return; }
+            const v = document.getElementById('qc-video');
+            if (v) v.srcObject = qcStream;
+            document.getElementById('quickcam-modal').style.display = 'flex';
+        }
+        function quickCamClose() {
+            if (qcStream) { qcStream.getTracks().forEach(t => t.stop()); qcStream = null; }
+            const m = document.getElementById('quickcam-modal');
+            if (m) m.style.display = 'none';
+        }
+        function quickCamSnap() {
+            const v = document.getElementById('qc-video');
+            if (!v || v.readyState < 2 || !v.videoWidth || !v.videoHeight) { showNotification('SENSOR WAKING -- ONE BEAT...'); return; }
+            const c = document.getElementById('qc-canvas');
+            const MAXD = 1024; // mail-scale: full frames would bloat letters past usefulness
+            const scale = Math.min(1, MAXD / Math.max(v.videoWidth, v.videoHeight));
+            c.width = Math.max(1, Math.round(v.videoWidth * scale));
+            c.height = Math.max(1, Math.round(v.videoHeight * scale));
+            const ctx = c.getContext('2d');
+            if (typeof currentFacingMode !== 'undefined' && currentFacingMode === 'user') { ctx.translate(c.width, 0); ctx.scale(-1, 1); } // mirror selfies like the main cam
+            ctx.drawImage(v, 0, 0, c.width, c.height);
+            cmAttach.photo = c.toDataURL('image/jpeg', 0.72); // string entry rides the letter as-is
+            refreshAttachUi();
+            quickCamClose();
+            showNotification('PHOTO ATTACHED TO DRAFT.');
+        }
+
         function closePhotoPick() {
             document.getElementById('photo-pick-modal').style.display = 'none';
             if (photoPickMode === 'attach') {
@@ -4966,6 +5088,17 @@
         // v0.55: [+ ISSUE NEW QUEST] on DATA > CONTRACTS -- pick a wastelander, land in the composer
         function issueQuestStart() { openRecipientPicker('quest'); }
 
+        // v0.56: [SAVE PHOTO] on inbound transmissions -- files the shot into the CAM DATABANK
+        function saveMailPhoto(dataUrl) {
+            if (!dataUrl || typeof dataUrl !== 'string') return;
+            photoArchive.unshift(dataUrl); // string entries are first-class (entryPip handles both)
+            try { localStorage.setItem('pipboy-photos', JSON.stringify(photoArchive)); }
+            catch (e) { showNotification('DATABANK FULL -- PHOTO COULD NOT BE FILED.'); return; }
+            const camTab = document.getElementById('tab-cam');
+            if (camTab && camTab.classList.contains('active')) renderPhotoGallery();
+            showNotification('PHOTO FILED TO DATABANK.');
+        }
+
         function renderMail() {
             const el = document.getElementById('mail-container');
             if (!el) return;
@@ -5062,6 +5195,7 @@
                 }});
             }
             if (m.dir === 'in' && m.uid) buttons.push({ label: 'REPLY', action: () => composeTo('msg', m.uid) });
+            if (m.photo) buttons.push({ label: 'SAVE PHOTO', action: () => saveMailPhoto(m.photo) }); // v0.56
             buttons.push({ label: 'CLOSE', color: 'var(--pip-color-dim)' });
             showCustomPrompt(stamp + '\n\n' + body, buttons);
             // cp modal is open now — hang the photo on it if one survived the storage guard
@@ -5100,11 +5234,13 @@
         function selectBeacon(uid) {
             selectedBeaconUid = safeUid(uid);
             deselectZone(); // v0.51: one selection at a time -- clears zone label/card
+            deselectPin(); // v0.56
             updateMapUserCard();
         }
         function deselectBeacon() {
             selectedBeaconUid = null;
             deselectZone(); // v0.51: [X] / map-tap / GPS-off clear zone selections as well
+            deselectPin(); // v0.56: and shared-pin selections
             const card = document.getElementById('map-user-card');
             if (card) card.style.display = 'none';
             const nm = document.getElementById('muc-name');
@@ -5115,6 +5251,7 @@
         // Overseer (dev mode) units get [EXTINGUISH] right here on the map -- no STATS trip.
         function selectZone(zk) {
             if (selectedBeaconUid) selectedBeaconUid = null; // one card at a time
+            deselectPin(); // v0.56
             if (selectedZoneKey && selectedZoneKey !== zk) {
                 const prev = zoneMarkerRefs[selectedZoneKey];
                 if (prev) prev.closeTooltip();
@@ -5133,6 +5270,65 @@
             const card = document.getElementById('map-user-card');
             if (card && !selectedBeaconUid) card.style.display = 'none';
         }
+        // v0.56: shared-pin sticky select + Overseer broadcast-pin removal (zone warden sibling)
+        let selectedPinKey = null;
+        function selectSharedPin(key) {
+            deselectBeacon(); // one card at a time (clears beacon + zone + pin)
+            selectedPinKey = key;
+            const pm = pinMarkerRefs[key];
+            if (pm) pm.openTooltip();
+            updatePinCard();
+        }
+        function deselectPin() {
+            if (selectedPinKey) {
+                const pm = pinMarkerRefs[selectedPinKey];
+                if (pm) pm.closeTooltip();
+                selectedPinKey = null;
+            }
+        }
+        function updatePinCard() {
+            const card = document.getElementById('map-user-card');
+            if (!card) return;
+            const key = selectedPinKey;
+            if (!key) return;
+            const p = lastKnownSharedPins[key];
+            if (!p) { deselectPin(); card.style.display = 'none'; return; }
+            const nameEl = document.getElementById('muc-name');
+            nameEl.innerText = String(p.label || 'BROADCAST MARKER').toUpperCase();
+            nameEl.style.color = 'var(--pip-color)';
+            let info = 'SHARED BY ' + String(p.fromName || 'UNKNOWN').toUpperCase();
+            if (myLastLat !== null && typeof p.lat === 'number') {
+                const d = getDistance(myLastLat, myLastLng, p.lat, p.lng);
+                info += ' | ' + (d < 1000 ? Math.round(d) + 'M AWAY' : ((d / 1000).toFixed(1) + 'KM AWAY'));
+            }
+            document.getElementById('muc-info').innerText = info;
+            const vc = document.getElementById('muc-vitals'); if (vc) { vc.style.display = 'none'; vc.innerHTML = ''; } // pins have no vitals
+            const actions = document.getElementById('muc-actions');
+            if (localStorage.getItem('pipboy-dev-mode') === 'true') {
+                actions.innerHTML = '<button class="theme-btn" style="flex:1; border-color:#ff3333; color:#ff3333;" onclick="removeSharedPin(\'' + key + '\')">[REMOVE BROADCAST]</button>';
+            } else {
+                actions.innerHTML = '<div style="font-size:0.85rem; opacity:0.7; width:100%;">BROADCAST MARKER -- EVERY UNIT SEES THIS PIN.</div>';
+            }
+            card.style.display = 'block';
+        }
+        function removeSharedPin(key) {
+            const lbl = String((lastKnownSharedPins[key] || {}).label || 'THIS MARKER').toUpperCase();
+            showCustomPrompt('REMOVE "' + lbl + '" FROM EVERY UNIT\'S MAP?', [
+                { label: 'REMOVE BROADCAST', color: '#ff3333', action: () => {
+                    if (!window.db) { showNotification('NO SATELLITE LINK.'); return; }
+                    window.firebaseRemove(window.firebaseRef(window.db, 'sharedpins/' + key))
+                        .then(() => {
+                            showNotification('BROADCAST PIN REMOVED FROM ALL UNITS.');
+                            deselectPin();
+                            const card = document.getElementById('map-user-card');
+                            if (card) card.style.display = 'none';
+                        })
+                        .catch(() => showNotification('REMOVAL REJECTED -- CHECK SIGNAL.'));
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+
         function updateZoneCard() {
             const card = document.getElementById('map-user-card');
             if (!card) return;
@@ -5259,8 +5455,19 @@
         setInterval(() => { flushOutbox(); refreshOutboxStatuses(); }, 20000);
         // v0.55: wake-and-ship -- when the app returns from sleep/backgound, flush any
         // letters Android froze mid-send (root cause of the "7-minute quest" report).
-        document.addEventListener('visibilitychange', () => { if (!document.hidden) { flushOutbox(); refreshOutboxStatuses(); } });
-        window.addEventListener('pageshow', () => { flushOutbox(); refreshOutboxStatuses(); });
+        // v0.56: WAKE-STAMP -- a unit returning from sleep must IMMEDIATELY re-announce
+        // itself: beacons age out of the LIVE census after 5 min of silence, and a
+        // stationary player may never fire another geolocation event. Re-push the beacon
+        // (only if the player opted into live tracking) and re-run the rad/pariah field
+        // math against whatever zones are freshest.
+        function wakeStamp() {
+            try {
+                if (liveTrackingEnabled && myLastLat !== null && myLastLng !== null) pushMyBeacon(myLastLat, myLastLng);
+                evalPariahField();
+            } catch (e) {}
+        }
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) { wakeStamp(); flushOutbox(); refreshOutboxStatuses(); } });
+        window.addEventListener('pageshow', () => { wakeStamp(); flushOutbox(); refreshOutboxStatuses(); });
 
         // ========================= POX RADIO (v0.53) =========================
         // Three looping dials from radio-stations.json (precached app file). Audio lives
@@ -5284,6 +5491,7 @@
         let radioSyncOn = localStorage.getItem('pipboy-radio-sync') !== 'off'; // default ON
         let radioAppliedEpoch = {};    // { sid: epoch } this unit last joined with -- a change = SKIP/RESTART
         let radioSyncTimer = null;     // 5s drift watchdog while synced
+        let radioOrder = {};           // v0.56: free-run shuffle memory { sid: [trackIdx,...] }
         const radioAudio = new Audio();
         radioAudio.preload = 'auto';
 
@@ -5329,6 +5537,7 @@
             const sb = document.getElementById('radio-sync-btn');
             if (sb) sb.innerText = '[ STATION SYNC: ' + (radioSyncOn ? 'ON' : 'OFF') + ' ]';
             renderRadioOverseer();
+            updateHud(); // v0.56: header glyphs
         }
 
         function radioStationTap(sid) {
@@ -5338,9 +5547,14 @@
             radioCur = sid;
             if (radioIsSynced(sid)) {
                 radioJoinLive(true); // v0.54: land on the same second of the same track as everyone
-                showNotification('TUNED TO LIVE BROADCAST.');
+                // v0.56: no toast -- the HUD glyph + row badge carry the state (user cull)
             } else {
-                radioTrackIdx = (radioPos[sid] != null && radioPos[sid] < st.tracks.length) ? radioPos[sid] : 0;
+                // v0.56: free-run reshuffles every listen; resume memory stores the TRACK (mapped into the fresh order)
+                delete radioOrder[sid];
+                const order = radioOrderForSid(st, sid);
+                const mem = radioPos[sid];
+                const at = (mem != null && mem < st.tracks.length) ? order.indexOf(mem) : -1;
+                radioTrackIdx = at >= 0 ? at : 0;
                 radioStatic(420);
                 radioPlayCurrent();
             }
@@ -5350,7 +5564,7 @@
         function radioPlayCurrent(startAt) {
             const st = stationById(radioCur);
             if (!st) return;
-            const tr = st.tracks[radioTrackIdx];
+            const tr = radioTrackAt(st, radioCur, radioTrackIdx); // v0.56: shuffled order
             const now = document.getElementById('radio-now');
             const synced = radioIsSynced(radioCur); // v0.54
             radioAudio.src = trackUrl(st, tr);
@@ -5374,8 +5588,8 @@
         function radioNext() {
             const st = stationById(radioCur);
             if (!st) return;
-            radioTrackIdx = (radioTrackIdx + 1) % st.tracks.length; // just looping
-            radioPos[radioCur] = radioTrackIdx;
+            radioTrackIdx = (radioTrackIdx + 1) % st.tracks.length; // just looping (positions in the shuffle order)
+            radioPos[radioCur] = radioOrderForSid(st, radioCur)[radioTrackIdx]; // v0.56: persist the TRACK, not the position
             saveRadioState();
             radioPlayCurrent();
         }
@@ -5396,6 +5610,74 @@
             renderRadioTab();
         }
 
+        // ==================== OVERSEER WIRE (v0.56) ====================
+        // One-slot satellite board (announcements/latest {text<=140, from<=32, ts}): the
+        // Overseer's voice onto every Pip-Boy. Own push switch (default ON), persistent
+        // amber banner under the header until dismissed; 12h expiry; survives offline boot.
+        let wireFirstSnap = true;
+        let lastWireObj = null;
+        function wireAlertsOn() { return localStorage.getItem('pipboy-wire-alerts') !== '0'; }
+        function cycleWireAlerts() {
+            const on = localStorage.getItem('pipboy-wire-alerts') === '0';
+            localStorage.setItem('pipboy-wire-alerts', on ? '1' : '0');
+            const b = document.getElementById('options-wire-btn');
+            if (b) b.innerText = '[WIRE ALERTS: ' + (on ? 'ON' : 'OFF') + ']';
+            showNotification('WIRE ALERTS ' + (on ? 'ON.' : 'OFF.'));
+        }
+        function startWireListener() {
+            window.firebaseOnValue(window.firebaseRef(window.db, 'announcements/latest'), (snap) => {
+                const w = snap.val();
+                try { if (w && w.ts) localStorage.setItem('pipboy-wire-last', JSON.stringify(w)); } catch (e) {}
+                const isFreshArrival = !wireFirstSnap && w && w.ts && (!lastWireObj || lastWireObj.ts !== w.ts);
+                lastWireObj = w || null;
+                updateWireBanner(lastWireObj);
+                if (wireFirstSnap) { wireFirstSnap = false; return; } // boot sync isn't news
+                if (isFreshArrival) {
+                    showNotification('OVERSEER WIRE: ' + String(w.text || '').toUpperCase());
+                    if (wireAlertsOn()) { try { pushNativeNotification('OVERSEER WIRE -- ' + String(w.text || '')); } catch (e) {} }
+                }
+            }, () => {});
+        }
+        function updateWireBanner(w) {
+            const b = document.getElementById('wire-banner');
+            if (!b) return;
+            const dismissed = localStorage.getItem('pipboy-wire-dismissed') || '';
+            const fresh = !!(w && w.ts && (Date.now() - w.ts) < 12 * 3600 * 1000);
+            if (fresh && String(w.ts) !== dismissed) {
+                document.getElementById('wire-banner-text').innerText = String(w.text || '').toUpperCase();
+                b.style.display = 'block';
+            } else {
+                b.style.display = 'none';
+            }
+        }
+        function dismissWire() {
+            if (lastWireObj && lastWireObj.ts) localStorage.setItem('pipboy-wire-dismissed', String(lastWireObj.ts));
+            const b = document.getElementById('wire-banner');
+            if (b) b.style.display = 'none';
+        }
+        // Offline boot: paint the last wire from storage until the satellite answers.
+        (function bootWireFromStorage() {
+            try { const w = JSON.parse(localStorage.getItem('pipboy-wire-last') || 'null'); if (w && w.ts) { lastWireObj = w; updateWireBanner(w); } } catch (e) {}
+            const b = document.getElementById('options-wire-btn');
+            if (b && localStorage.getItem('pipboy-wire-alerts') === '0') b.innerText = '[WIRE ALERTS: OFF]';
+        })();
+        function sendWire() {
+            const ta = document.getElementById('wire-text');
+            const text = ((ta && ta.value) || '').trim().toUpperCase();
+            if (!text) { showNotification('WIRE TEXT IS EMPTY.'); return; }
+            if (text.length > 140) { showNotification('KEEP THE WIRE UNDER 140 CHARACTERS.'); return; }
+            showCustomPrompt('TRANSMIT THIS WIRE TO EVERY PIP-BOY?\n\n"' + text + '"', [
+                { label: 'TRANSMIT', color: '#ffb642', action: () => {
+                    if (!window.db) { showNotification('NO SATELLITE LINK.'); return; }
+                    window.firebaseSet(window.firebaseRef(window.db, 'announcements/latest'), {
+                        text: text, from: (userProfile.name || 'OVERSEER').toUpperCase().slice(0, 32), ts: Date.now()
+                    }).then(() => { showNotification('WIRE TRANSMITTED.'); const t2 = document.getElementById('wire-text'); if (t2) t2.value = ''; })
+                      .catch(() => showNotification('WIRE REJECTED -- RULES NEED THE ANNOUNCEMENTS NODE (RULES PASTE STEP).'));
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+
         // ==================== RADIO SYNC ENGINE (v0.54) ====================
         // Live radio with zero servers: nobody broadcasts audio -- we sync PLAYHEADS. The
         // Overseer writes radio/{sid} {epoch}; every unit computes elapsed = serverNow - epoch,
@@ -5413,14 +5695,41 @@
             if (!st || !st.totalDur || !row || !row.epoch) return null;
             let el = ((radioServerNow() - row.epoch) / 1000) % st.totalDur;
             if (el < 0) el += st.totalDur;
+            const order = radioOrderForSid(st, sid); // v0.56: same order on every synced unit
             let acc = 0;
-            for (let i = 0; i < st.tracks.length; i++) {
-                const d = st.tracks[i].d || 0;
+            for (let i = 0; i < order.length; i++) {
+                const d = st.tracks[order[i]].d || 0;
                 if (el < acc + d) return { idx: i, seek: el - acc };
                 acc += d;
             }
             return { idx: 0, seek: 0 };
         }
+        // v0.56: SHUFFLED PLAYLISTS (user: "randomise, arcs mixed in"). Free-run reshuffles each
+        // listen; SYNCED dials seed the shuffle from the broadcast epoch so every unit computes
+        // the identical shuffled loop -- order walks, SKIP and boundaries all march in lockstep
+        // (loop length is permutation-invariant). radioTrackIdx is an ORDER POSITION from here on.
+        function radioSeededOrder(st, seed) {
+            const idx = st.tracks.map((_, i) => i);
+            let s = (seed >>> 0) || 1;
+            const rnd = () => { // mulberry32
+                s |= 0; s = (s + 0x6D2B79F5) | 0;
+                let t = Math.imul(s ^ (s >>> 15), 1 | s);
+                t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+            for (let i = idx.length - 1; i > 0; i--) {
+                const j = Math.floor(rnd() * (i + 1));
+                const tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp;
+            }
+            return idx;
+        }
+        function radioOrderForSid(st, sid) {
+            if (radioIsSynced(sid)) return radioSeededOrder(st, radioLive[sid].epoch);
+            if (!radioOrder[sid] || radioOrder[sid].length !== st.tracks.length) radioOrder[sid] = radioSeededOrder(st, Date.now() ^ Math.floor(Math.random() * 0xFFFFFF));
+            return radioOrder[sid];
+        }
+        function radioTrackAt(st, sid, ordPos) { return st.tracks[radioOrderForSid(st, sid)[ordPos]]; }
+
         // Snap local state to the live playhead and play. withStatic = crackle flourish on a
         // manual tune or an overseer shift; boundary hops stay tight (static's baked into tracks).
         function radioJoinLive(withStatic) {
@@ -5428,7 +5737,7 @@
             if (!sid || !radioIsSynced(sid)) return;
             const pos = radioLivePos(sid) || { idx: 0, seek: 0 };
             radioTrackIdx = pos.idx;
-            radioPos[sid] = pos.idx;
+            radioPos[sid] = radioOrderForSid(stationById(sid), sid)[pos.idx]; // v0.56: persist the TRACK
             radioAppliedEpoch[sid] = radioLive[sid].epoch;
             saveRadioState();
             if (withStatic) radioStatic(420);
@@ -5442,14 +5751,14 @@
             const st = stationById(radioCur);
             const pos = radioLivePos(radioCur);
             if (!pos) return; // broadcast cut -- the radio/ listener handles the stop
-            const endNear = (st.tracks[radioTrackIdx].d || 0) - 0.75;
+            const endNear = ((radioTrackAt(st, radioCur, radioTrackIdx) || {}).d || 0) - 0.75; // v0.56: order position -> track
             if (pos.idx === radioTrackIdx && pos.seek > endNear) {
                 if ((retry || 0) < 4) { setTimeout(() => radioSyncBoundary((retry || 0) + 1), 800); }
                 else { radioNext(); }
                 return;
             }
             radioTrackIdx = pos.idx;
-            radioPos[radioCur] = pos.idx;
+            radioPos[radioCur] = radioOrderForSid(st, radioCur)[pos.idx]; // v0.56: persist the TRACK
             saveRadioState();
             radioPlayCurrent(pos.seek);
         }
@@ -5470,14 +5779,12 @@
             radioSyncOn = !radioSyncOn;
             localStorage.setItem('pipboy-radio-sync', radioSyncOn ? 'on' : 'off');
             if (radioCur) radioStop(); // clean re-tune under the new mode
-            showNotification(radioSyncOn
-                ? 'STATION SYNC ON -- TAP A DIAL TO JOIN THE LIVE BROADCAST.'
-                : 'STATION SYNC OFF -- DIALS FREE-RUN ON THIS UNIT.');
-            renderRadioTab();
+            renderRadioTab(); // v0.56: the button label + HUD glyph say it -- toast culled per user
         }
         // Satellite listeners; deferred until window.db exists (same retry shape as initComms).
         function initRadioSync(tries) {
             if (window.db && window.firebaseOnValue && window.firebaseRef) {
+                startWireListener(); // v0.56: the Overseer wire rides the same db-ready gate
                 window.firebaseOnValue(window.firebaseRef(window.db, '.info/serverTimeOffset'), (snap) => {
                     radioServerOffset = snap.val() || 0;
                 }, () => {});
@@ -5491,8 +5798,7 @@
                                 showNotification('BROADCAST ENDED -- THE DIAL WENT DARK.');
                             }
                         } else if (radioSyncOn && radioAppliedEpoch[radioCur] !== undefined && radioAppliedEpoch[radioCur] !== row.epoch) {
-                            radioJoinLive(true); // overseer SKIP / fresh GO LIVE shifted the playhead
-                            showNotification('OVERSEER SHIFTED THE BROADCAST.');
+                            radioJoinLive(true); // overseer SKIP / fresh GO LIVE shifted the playhead (no toast: the audio jump IS the notice)
                         }
                     }
                     renderRadioTab();
@@ -5546,8 +5852,9 @@
             const st = stationById(sid);
             const pos = radioLivePos(sid);
             if (!st || !pos) return;
+            const order = radioOrderForSid(st, sid); // v0.56: the SHARED shuffled order (epoch-seeded)
             let acc = 0; // loop-seconds through the END of the current track = next track's start
-            for (let i = 0; i <= pos.idx; i++) acc += (st.tracks[i].d || 0);
+            for (let i = 0; i <= pos.idx; i++) acc += (st.tracks[order[i]].d || 0);
             acc = acc % st.totalDur;
             radioWriteEpoch(sid, radioServerNow() - Math.round(acc * 1000));
             showNotification('SKIPPED -- ALL SYNCED UNITS JUMP TOGETHER.');
@@ -5659,9 +5966,11 @@
 
 
         renderMailBadge();
+        hydrateLastFix(); // v0.56: self-dot from the persisted fix, even before GPS arms
         initComms();
         initRadio();      // v0.53: load the three-dial manifest + download badges
         maybeAutoGps(); // v0.52: GPS is on-until-turned-off -- silently re-arm if it was left on
+        updateHud();    // v0.56: header glyphs paint at boot
 
         // ==================== PWA INSTALL PIPELINE (v0.32) ====================
         // Root cause of "install did nothing on Chrome": the WebAPK minting pipeline is
