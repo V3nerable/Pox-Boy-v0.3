@@ -3884,6 +3884,7 @@
         // as a MAIL tab row instead of jumping a pop-up in your face)
         let linkScans = JSON.parse(localStorage.getItem('pipboy-linkscans') || '{}');
         let contactUidTarget = null; // recipient of the current composer / contact sheet
+        let replyToKey = null; // v0.61: track which message key we're replying to, so we can auto-log it
         let selectedBeaconUid = null;
         let lastKnownBeaconData = {};
         let myLastLat = null, myLastLng = null;
@@ -4679,7 +4680,7 @@
                 if (!p.photo && !p.item) {
                     showCustomPrompt('MESSAGE FROM ' + from + ': "' + (p.text || '') + '"', [
                         { label: 'LOG TRANSMISSION', action: () => acceptMsg(key, l) },
-                        { label: 'REPLY', action: () => composeTo('msg', safeUid(l.from)) },
+                        { label: 'REPLY', action: () => composeTo('msg', safeUid(l.from), key) },
                         { label: 'DELETE', color: '#ff3333', action: () => declineLetter(key) }
                     ]);
                     return;
@@ -4692,7 +4693,7 @@
                     : from + ' SENT A PHOTO TRANSMISSION.';
                 const msgBtns = [
                     { label: p.item ? 'LOG + TAKE ITEM' : 'LOG TRANSMISSION', action: () => acceptMsg(key, l) },
-                    { label: 'REPLY', action: () => composeTo('msg', safeUid(l.from)) },
+                    { label: 'REPLY', action: () => composeTo('msg', safeUid(l.from), key) },
                 ];
                 if (p.photo) msgBtns.push({ label: 'SAVE PHOTO', action: () => saveMailPhoto(p.photo) }); // v0.56
                 msgBtns.push({ label: 'DELETE', color: '#ff3333', action: () => declineLetter(key) });
@@ -4772,6 +4773,7 @@
             saveComms();
             showNotification('TRANSMISSION LOGGED.');
             if (mailTabActive()) renderMail();
+            setTimeout(() => { if (mailTabActive()) renderMail(); }, 50); // v0.61: delayed re-render to ensure UI updates
         }
 
         // v0.48: photo auto-save to the CAM databank is GONE (user: "open received image in
@@ -5203,12 +5205,13 @@
             const b = lastKnownBeaconData[uid];
             return { uid: uid, name: (b && b.name) ? b.name : 'UNKNOWN SIGNAL', linked: false };
         }
-        function composeTo(kind, uidOverride) {
+        function composeTo(kind, uidOverride, fromKey) {
             const uid = uidOverride || contactUidTarget;
             const t = composeTargetInfo(uid);
             if (!t) { showNotification('NO TARGET SELECTED.'); return; }
             if ((kind === 'quest' || kind === 'item') && !t.linked) { showNotification('SCAN THEIR DATACARD FIRST -- CONTRACTS AND ITEMS NEED A LINK.'); return; }
             contactUidTarget = t.uid;
+            replyToKey = fromKey || null; // v0.61: store the message key we're replying to
             closeModals();
             if (kind === 'msg') {
                 document.getElementById('cm-title').innerText = 'MESSAGE TO: ' + t.name + (t.linked ? '' : ' (UNLINKED)');
@@ -5332,6 +5335,11 @@
                 const logEntry = { dir: 'out', uid: t.uid, name: t.name, text: text.toUpperCase(), ts: Date.now(), hasPhoto: !!photoUrl, itemName: attach.item ? attach.item.name : null };
                 mailLog.unshift(logEntry);
                 if (mailLog.length > 100) mailLog.pop();
+                // v0.61: if this is a reply, auto-log the original message (remove from ACTION REQUIRED)
+                if (replyToKey && inboxLetters[replyToKey]) {
+                    acceptMsg(replyToKey, inboxLetters[replyToKey]);
+                    replyToKey = null;
+                }
                 if (photoUrl) makeMailThumb(photoUrl, thumb => {
                     if (!thumb || mailLog.indexOf(logEntry) === -1) return;
                     logEntry.photo = thumb;
@@ -5347,9 +5355,11 @@
                 compressMailPhoto(attach.photo, url => {
                     if (!url) { showNotification('PHOTO UNREADABLE -- TRANSMISSION ABORTED.'); return; }
                     fire(url);
+                    setTimeout(() => { if (mailTabActive()) renderMail(); }, 50); // v0.61: delayed re-render after modal close
                 });
             } else {
                 fire(null);
+                setTimeout(() => { if (mailTabActive()) renderMail(); }, 50); // v0.61: delayed re-render after modal close
             }
         }
 
