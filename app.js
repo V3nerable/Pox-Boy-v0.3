@@ -172,6 +172,78 @@
             localStorage.setItem('pipboy-factions', JSON.stringify(factions));
         }
 
+        // ==================== FUN / WILD STATS (v0.57) ====================
+        // Cumulative counters tracked for the STATS page. Some derive from existing data
+        // (quests, rolodex, photos), others are incremented at relevant engine points.
+        let funStats = {
+            radsTotal: 0,        // lifetime rads absorbed (incremented in adjustRads for positive deltas)
+            distance: 0,         // km travelled (incremented in GPS fix handler)
+            geiger: 0,           // geiger burst count
+            peanuts: 0,          // peanuts stolen (pure fun — random seed on first boot)
+            rats: 0,             // rats caught by the tail (pure fun)
+            nearDeath: 0,        // times HP dropped below 20%
+            marches: 0,          // enclave marches endured (radio enclave track plays)
+            regret: 0            // photographs regretted (pure fun — random seed)
+        };
+        (function loadFunStats() {
+            try {
+                const saved = JSON.parse(localStorage.getItem('pipboy-funstats') || 'null');
+                if (saved) { for (let k in saved) { if (funStats.hasOwnProperty(k)) funStats[k] = saved[k]; } }
+                // First-boot random seeds for the silly counters
+                if (!saved || saved.peanuts === undefined) {
+                    funStats.peanuts = Math.floor(Math.random() * 12);
+                    funStats.rats = Math.floor(Math.random() * 5);
+                    funStats.regret = Math.floor(Math.random() * 3);
+                    saveFunStats();
+                }
+            } catch (e) {}
+        })();
+        function saveFunStats() {
+            try { localStorage.setItem('pipboy-funstats', JSON.stringify(funStats)); } catch (e) {}
+        }
+        function bumpFunStat(key, delta) {
+            if (!funStats.hasOwnProperty(key)) return;
+            funStats[key] = Math.max(0, (funStats[key] || 0) + (delta || 1));
+            saveFunStats();
+        }
+        function renderFunStats() {
+            // Derived stats (computed live from existing data)
+            const el = (id) => document.getElementById(id);
+            const qCompleted = quests.filter(q => q.completed).length;
+            const daysPassed = Math.floor((Date.now() - (funStats._bootTime || Date.now())) / 86400000) || 0;
+            const locations = waypoints.filter(w => w.discovered).length || 1;
+            const txSent = (typeof mailLog !== 'undefined') ? mailLog.filter(m => m.dir === 'out').length : 0;
+            const photos = (typeof photoArchive !== 'undefined') ? photoArchive.length : 0;
+            const wastelandersMet = (typeof rolodex !== 'undefined') ? rolodex.length : 0;
+
+            // Field status (from rad engine)
+            const fsEl = el('fs-field-status');
+            if (fsEl) {
+                const fixAge = lastFixAt ? Math.max(0, Math.floor((Date.now() - lastFixAt) / 60000)) : null;
+                const fieldTxt = radFieldActive ? ('INSIDE ' + (radFieldPariah || 'FIELD')) : (medShelterActive ? 'IN MED SHELTER' : 'OPEN WASTES');
+                const fieldColor = radFieldActive ? '#ff3333' : (medShelterActive ? '#5fc98e' : 'inherit');
+                fsEl.style.color = fieldColor;
+                fsEl.innerText = 'FIELD STATUS: ' + fieldTxt + ' · LAST FIX ' + (fixAge === null ? 'NEVER' : fixAge + 'M AGO');
+            }
+
+            if (el('fs-locations')) el('fs-locations').innerText = locations;
+            if (el('fs-days')) el('fs-days').innerText = daysPassed;
+            if (el('fs-quests')) el('fs-quests').innerText = qCompleted;
+            if (el('fs-wastelanders')) el('fs-wastelanders').innerText = wastelandersMet;
+            if (el('fs-tx-sent')) el('fs-tx-sent').innerText = txSent;
+            if (el('fs-photos')) el('fs-photos').innerText = photos;
+
+            // Wild / cumulative stats
+            if (el('fs-rads-total')) el('fs-rads-total').innerText = funStats.radsTotal;
+            if (el('fs-distance')) el('fs-distance').innerText = (funStats.distance / 1000).toFixed(1) + ' KM';
+            if (el('fs-geiger')) el('fs-geiger').innerText = funStats.geiger;
+            if (el('fs-peanuts')) el('fs-peanuts').innerText = funStats.peanuts;
+            if (el('fs-rats')) el('fs-rats').innerText = funStats.rats;
+            if (el('fs-neardth')) el('fs-neardth').innerText = funStats.nearDeath;
+            if (el('fs-marches')) el('fs-marches').innerText = funStats.marches;
+            if (el('fs-regret')) el('fs-regret').innerText = funStats.regret;
+        }
+
         // ONBOARDING LOGIC (v0.29: the G.O.A.T. exam is the SOLE S.P.E.C.I.A.L. allocator)
         const obSpecial = { S: 1, P: 1, E: 1, C: 1, I: 1, A: 1, L: 1 };
         const specialNames = { S: 'STRENGTH', P: 'PERCEPTION', E: 'ENDURANCE', C: 'CHARISMA', I: 'INTELLIGENCE', A: 'AGILITY', L: 'LUCK' };
@@ -840,7 +912,7 @@
             document.getElementById('dev-controls').style.display = (tabId === 'stat' && currentStatTab === 'stats') ? 'flex' : 'none';
             
             document.getElementById('map-controls').style.display = (tabId === 'map' && isDev) ? 'flex' : 'none';
-            const mcc = document.getElementById('map-cam-controls'); if (mcc) mcc.style.display = (tabId === 'map') ? 'flex' : 'none'; // v0.55: all-player camera row
+            // v0.57: map camera overlay is always visible on the map tab (positioned on the map itself)
             const addMarkerBtn = document.getElementById('dev-add-marker-btn');
             const remMarkerBtn = document.getElementById('dev-remove-marker-btn');
             if (addMarkerBtn) addMarkerBtn.style.display = isDev ? 'inline-block' : 'none';
@@ -881,21 +953,23 @@
                 currentInvTab = subTabId; // v0.53: INV tab retired; branch kept inert for stale callers
                 renderInventory(subTabId);
             } else if (parentTab === 'stat') {
-                // v0.53: STAT gained a STATS sub-page (relocated from DATA) hosting the
-                // Overseer console (pariah/zone panels) under dev-mode.
+                // v0.57: STAT sub-tabs are now STATUS / SPECIAL (merged skills+perks) / STATS / OPTIONS
                 currentStatTab = subTabId;
                 document.getElementById('dev-controls').style.display = (subTabId === 'stats') ? 'flex' : 'none';
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
-                document.getElementById(`sub-${parentTab}-${subTabId}`).classList.add('active');
+                const target = document.getElementById(`sub-${parentTab}-${subTabId}`);
+                if (target) target.classList.add('active');
                 if (subTabId === 'stats') renderStatsTab();
             } else if (parentTab === 'data') {
+                // v0.57: DATA sub-tabs are now QUESTS / CONTRACTS / WASTELANDERS / FACTIONS (OPTIONS moved to STAT)
                 currentDataTab = subTabId;
                 document.getElementById('add-quest-btn').style.display = (subTabId === 'quests' && isDev) ? 'inline-block' : 'none';
                 document.getElementById('faction-controls').style.display = (subTabId === 'factions' && isDev) ? 'flex' : 'none';
                 const devBtns = document.getElementById('dev-controls'); if (devBtns && subTabId !== '_mail') devBtns.style.display = (currentStatTab === 'stats' && document.getElementById('tab-stat').classList.contains('active')) ? 'flex' : 'none';
 
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
-                document.getElementById(`sub-${parentTab}-${subTabId}`).classList.add('active');
+                const dataTarget = document.getElementById(`sub-${parentTab}-${subTabId}`);
+                if (dataTarget) dataTarget.classList.add('active');
                 if (subTabId === 'quests') renderQuests();
                 if (subTabId === 'contracts') renderContracts();
                 if (subTabId === 'factions') renderFactions();
@@ -1439,45 +1513,11 @@
         })();
 
         // Custom in-app confirmation replacement
-        let cpStepVal = 0; // v0.57: pending number while a stepper prompt is open
-        function showCustomPrompt(text, buttons, stepper) {
+        function showCustomPrompt(text, buttons) {
             // v0.45: the shared prompt can carry an image (mail photo viewer) — reset it
             // on every open so an old photo never bleeds into an unrelated query
             const cpImg = document.getElementById('cp-img');
             if (cpImg) { cpImg.style.display = 'none'; cpImg.removeAttribute('src'); }
-            // v0.57 (user: "Hot/med zone set any radius"): optional tap-stepper row -- dials
-            // a number with theme buttons, NO native keyboard (same convention as the
-            // faction-auth amount). Stepper presses never close the prompt; only real
-            // buttons do. Generic on purpose (bounty payouts etc. later).
-            const cpStep = document.getElementById('cp-stepper');
-            if (cpStep) {
-                cpStep.innerHTML = '';
-                if (stepper) {
-                    cpStepVal = stepper.value;
-                    const mkStep = function(delta) {
-                        const sb = document.createElement('button');
-                        sb.className = 'theme-btn';
-                        sb.style.cssText = 'font-size: 0.95rem; padding: 6px 9px; min-width: 50px;';
-                        sb.innerText = (delta > 0 ? '+' : '−') + Math.abs(delta);
-                        sb.onclick = function() {
-                            cpStepVal = Math.min(stepper.max, Math.max(stepper.min, cpStepVal + delta));
-                            const n = document.getElementById('cp-step-n'); if (n) n.innerText = cpStepVal + 'M';
-                            const d = document.getElementById('cp-deploy-btn'); if (d) d.innerText = 'DEPLOY ' + cpStepVal + 'M FENCE';
-                        };
-                        return sb;
-                    };
-                    const readout = document.createElement('span');
-                    readout.id = 'cp-step-n';
-                    readout.style.cssText = 'font-size: 1.3rem; font-weight: bold; min-width: 70px; text-align: center; text-shadow: 0 0 8px currentColor;';
-                    readout.innerText = cpStepVal + 'M';
-                    cpStep.appendChild(mkStep(-25)); cpStep.appendChild(mkStep(-5)); cpStep.appendChild(mkStep(-1));
-                    cpStep.appendChild(readout);
-                    cpStep.appendChild(mkStep(1)); cpStep.appendChild(mkStep(5)); cpStep.appendChild(mkStep(25));
-                    cpStep.style.display = 'flex';
-                } else {
-                    cpStep.style.display = 'none';
-                }
-            }
             document.getElementById('cp-text').innerText = text;
             const btnContainer = document.getElementById('cp-buttons');
             // v0.38: long button lists (e.g. mail recipient picker with a big rolodex)
@@ -1489,7 +1529,6 @@
             buttons.forEach(b => {
                 const btnEl = document.createElement('button');
                 btnEl.className = 'pip-btn';
-                if (b.id) btnEl.id = b.id; // v0.57: lets a stepper rewrite a button label live
                 btnEl.innerText = b.label;
                 if (b.color) {
                     btnEl.style.borderColor = b.color;
@@ -2047,6 +2086,9 @@
             }));
             buttons.push({ label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} });
             showCustomPrompt('REMOVE WHICH MAP MARKER?', buttons);
+            // v0.57: scroll the button stack to the top so the first markers are visible
+            const btnC = document.getElementById('cp-buttons');
+            if (btnC) btnC.scrollTop = 0;
         }
         
         function closeModals() { 
@@ -2770,6 +2812,11 @@
             restoreFullscreenIfDesired();
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
+            // v0.57: track distance travelled (haversine delta from previous fix)
+            if (myLastLat !== null && myLastLng !== null) {
+                const d = getDistance(myLastLat, myLastLng, lat, lng);
+                if (d > 1 && d < 500) { funStats.distance += d; saveFunStats(); } // ignore jumps >500m (GPS glitch)
+            }
             myLastLat = lat; myLastLng = lng; // feeds map wastelander-card distance readout
             lastFixAt = Date.now();
             try { localStorage.setItem('pipboy-lastfix', JSON.stringify({ lat: lat, lng: lng, ts: lastFixAt })); } catch (e) {} // v0.56: self-dot survives restarts
@@ -2966,23 +3013,9 @@
         }
 
         function renderStatsTab() {
-            const discoveredCount = waypoints.filter(wp => wp.discovered).length;
-            const container = document.getElementById('stats-general');
-            if (container) {
-                // v0.56: the engine testifies -- field state + fix age at a glance, so the
-                // next "I'm not taking rads" report comes with its own evidence attached
-                const fixAge = lastFixAt ? Math.max(0, Math.floor((Date.now() - lastFixAt) / 60000)) : null;
-                const fieldTxt = radFieldActive ? ('INSIDE ' + (radFieldPariah || 'FIELD')) : (medShelterActive ? 'IN MED SHELTER' : 'OPEN WASTES');
-                const fieldColor = radFieldActive ? '#ff3333' : (medShelterActive ? '#5fc98e' : 'inherit');
-                container.innerHTML = `
-                    <h2>GENERAL STATS</h2><br>
-                    <p style="color: ${fieldColor};">FIELD STATUS: ${fieldTxt} &middot; LAST FIX ${fixAge === null ? 'NEVER' : fixAge + 'M AGO'}</p>
-                    <p>LOCATIONS DISCOVERED: ${discoveredCount}</p>
-                    <p>WASTELANDERS MET: ${rolodex.length}</p>
-                    <p>DAYS PASSED: 0</p>
-                    <p>NUKA-COLAS DRUNK: 0</p>
-                `;
-            }
+            // v0.57: stats-general and stats-wild are now static HTML with span IDs;
+            // renderFunStats() updates the values live without destroying the DOM
+            renderFunStats();
             // v0.46: PARIAH WATCH panel renders under dev-mode only; hiding fully when
             // Overseer mode is off so players never see the control surface
             const pariahEl = document.getElementById('overseer-pariahs');
@@ -3194,7 +3227,8 @@
                     }
                     video.style.transform = mirror ? 'scaleX(-1)' : 'scaleX(1)';
                 } catch(e) {
-                video.style.transform = (currentFacingMode === 'user') ? 'scaleX(-1)' : 'scaleX(1)';
+                // v0.58: NO mirror on front-camera preview — text/signs must read correctly
+                video.style.transform = 'scaleX(1)';
             }
 
             // Re-arm the torch if NIGHT MODE survived a stream restart (flip/power-cycle)
@@ -3301,11 +3335,8 @@
                 canvas.height = video.videoHeight;
                 const ctx = canvas.getContext('2d');
 
-                // Front-facing: mirror the frame so the photo doesn't save backwards
-                if (isFront) {
-                    ctx.translate(canvas.width, 0);
-                    ctx.scale(-1, 1);
-                }
+                // v0.58: NO mirror on saved selfie — text/signs must be readable in the photo
+                // (previously front-camera shots were horizontally flipped)
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 ctx.setTransform(1, 0, 0, 1, 0, 0);
 
@@ -3923,10 +3954,18 @@
             const before = userProfile.rads || 0;
             const after = Math.min(1000, Math.max(0, before + delta));
             if (after === before) return;
+            // v0.57: track lifetime rads absorbed (positive deltas only)
+            if (delta > 0) { bumpFunStat('radsTotal', delta); }
+            // v0.57: near-death tracking (HP below 20%)
+            const newHp = Math.max(0, userProfile.maxHp - Math.floor((after / 1000) * userProfile.maxHp));
+            if (newHp < userProfile.maxHp * 0.2 && before < 1000 && newHp > 0) {
+                const oldHp = Math.max(0, userProfile.maxHp - Math.floor((before / 1000) * userProfile.maxHp));
+                if (oldHp >= userProfile.maxHp * 0.2) bumpFunStat('nearDeath', 1);
+            }
             userProfile.rads = after;
             saveToStorage();
             renderProfile();
-            renderVaultBoyFx(); // v0.50: the ≥250 static border tracks the count live
+            renderVaultBoyFx();
         }
 
         function evalPariahField() {
@@ -4006,6 +4045,7 @@
         function geigerBurst() {
             geigerClick();
             if (Math.random() < 0.25) setTimeout(geigerClick, 120 + Math.random() * 140);
+            bumpFunStat('geiger', 1); // v0.57: track geiger readings
         }
 
         // v0.48: two clocks. Fields burn FAST (user: "1 every 5 seconds"), recovery stays
@@ -4120,43 +4160,54 @@
                 label: kind === 'med' ? 'MED ZONE' : 'HOT ZONE',
                 kind: kind, lat: lat, lng: lng, radius: r, ts: Date.now()
             };
-            // v0.57 (user: "dont need ack after deployment"): success stays SILENT -- the
-            // fence drawing on every unit's map is the receipt. Only failures speak.
+            // v0.57: close the add-marker modal after deployment (was staying open); no ack toast needed
+            closeModals();
             window.firebaseSet(window.firebaseRef(window.db, 'radzones/' + key), zone)
                 .catch(() => showNotification('DEPLOY FAILED -- CHECK SIGNAL OR RULES.'));
         }
 
-        // v0.55: themed radius picker — replaces the old fixed-15m confirm dialog.
+        // v0.58: themed radius STEPPER — replaces the old chip picker.
+        // Tap ±1/±5/±25 to dial any fence 5–200M, DEPLOY commits.
+        let _zoneStepperVal = 50;
+        function cpStepVal(delta) {
+            _zoneStepperVal = Math.max(5, Math.min(200, _zoneStepperVal + delta));
+            const el = document.getElementById('cp-stepper-val');
+            if (el) el.innerText = _zoneStepperVal + 'M';
+            // Update the DEPLOY button label live
+            const deployBtn = document.getElementById('cp-deploy-btn');
+            if (deployBtn) deployBtn.innerText = 'DEPLOY ' + _zoneStepperVal + 'M FENCE';
+        }
         function promptZoneRadius(kind, where) {
-            // v0.57 (user: "after deploying hot/med zone the add marker UI stays up"): the
-            // placement modal sat UNDER the radius picker and popped back after deploy --
-            // close it the moment a zone button is tapped. No-op on the drop-at-boots path.
-            const awm = document.getElementById('add-waypoint-modal');
-            if (awm) awm.style.display = 'none';
             if (where === 'me' && (myLastLat === null || myLastLng === null)) { showNotification('NO POSITION FIX -- ENABLE GPS TRACKING FROM THE MAP TAB.'); return; }
             const lat = where === 'map' ? tempWpLat : myLastLat;
             const lng = where === 'map' ? tempWpLng : myLastLng;
             const med = kind === 'med';
             const tint = med ? '#5fc98e' : '#ff3333';
-            const mk = r => ({ label: r + 'M FENCE', color: tint, action: () => dropZone(kind, lat, lng, r) });
-            showCustomPrompt((med ? 'SANCTIFY' : 'IRRADIATE') + ' THIS SPOT? ' + (med ? 'A ✚ MED ZONE' : 'A ☢ HOT ZONE') + ' DEPLOYS FOR ALL UNITS UNTIL EXTINGUISHED. PICK THE FENCE RADIUS:', [
-                mk(10), mk(15), mk(25), mk(50), mk(100),
-                { label: 'SET RANGE...', color: tint, action: () => promptZoneStepper(kind, where, lat, lng) },
-                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
-            ]);
-        }
-
-        // v0.57 (user: "Hot/med zone set any radius"): tap-to-dial ANY fence from 5 to 200
-        // metres (the rules validator has allowed that range since v0.50) -- no chips limit,
-        // no native keyboard. DEPLOY button label tracks the dialled number live.
-        function promptZoneStepper(kind, where, lat, lng) {
-            const med = kind === 'med';
-            const tint = med ? '#5fc98e' : '#ff3333';
-            showCustomPrompt('DIAL THE FENCE RADIUS -- ' + (med ? '✚ MED ZONE' : '☢ HOT ZONE') + ' -- 5 TO 200 METRES:', [
-                { id: 'cp-deploy-btn', label: 'DEPLOY 15M FENCE', color: tint, action: () => dropZone(kind, lat, lng, cpStepVal) },
-                { label: 'BACK TO QUICK SIZES', color: 'var(--pip-color-dim)', action: () => promptZoneRadius(kind, where) },
-                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
-            ], { value: 15, min: 5, max: 200 });
+            _zoneStepperVal = 50; // default
+            const stepperHtml = '<div id="cp-stepper" style="display:flex; align-items:center; justify-content:center; gap:6px; margin:15px 0; flex-wrap:wrap;">' +
+                '<button class="theme-btn" onclick="cpStepVal(-25)" style="padding:4px 8px;">−25</button>' +
+                '<button class="theme-btn" onclick="cpStepVal(-5)" style="padding:4px 8px;">−5</button>' +
+                '<button class="theme-btn" onclick="cpStepVal(-1)" style="padding:4px 8px;">−1</button>' +
+                '<span id="cp-stepper-val" style="font-size:1.8rem; font-weight:bold; min-width:70px; text-align:center; color:' + tint + '; text-shadow:0 0 6px ' + tint + ';">50M</span>' +
+                '<button class="theme-btn" onclick="cpStepVal(1)" style="padding:4px 8px;">+1</button>' +
+                '<button class="theme-btn" onclick="cpStepVal(5)" style="padding:4px 8px;">+5</button>' +
+                '<button class="theme-btn" onclick="cpStepVal(25)" style="padding:4px 8px;">+25</button>' +
+                '</div>';
+            showCustomPrompt(
+                (med ? 'SANCTIFY' : 'IRRADIATE') + ' THIS SPOT — SET FENCE RADIUS (5–200M):',
+                [
+                    { label: 'DEPLOY 50M FENCE', color: tint, action: () => {
+                        dropZone(kind, lat, lng, Math.max(5, Math.min(200, _zoneStepperVal)));
+                    }},
+                    { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+                ]
+            );
+            // Inject stepper HTML into the prompt text area (overrides innerText with innerHTML)
+            const cpText = document.getElementById('cp-text');
+            if (cpText) cpText.innerHTML = (med ? 'SANCTIFY' : 'IRRADIATE') + ' THIS SPOT — SET FENCE RADIUS (5–200M):' + stepperHtml;
+            // Tag the deploy button with an ID so the stepper can update its label live
+            const btns = document.getElementById('cp-buttons');
+            if (btns && btns.firstChild) btns.firstChild.id = 'cp-deploy-btn';
         }
 
         function dropHotZone(where) { promptZoneRadius('hot', where); } // v0.55: sized drops

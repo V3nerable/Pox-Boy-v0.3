@@ -480,3 +480,14 @@ html.plock-90 #pre-boot-box,  html.plock-270 #pre-boot-box  { max-height: 96vw !
         /* v0.56: blinking HUD warning glyph (satellite unstable -- holding last fix) */
         .hud-blink { animation: hudBlink 0.9s steps(2, start) infinite; }
         @keyframes hudBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+
+        /* v0.57: map camera overlay buttons — compact glyphs positioned on the map surface */
+        .map-overlay-btn {
+            width: 36px; height: 36px; border-radius: 4px;
+            border: 1px solid var(--pip-color); background: rgba(5, 16, 5, 0.9);
+            color: var(--pip-color); font-size: 1.3rem; font-family: 'VT323', monospace;
+            text-shadow: 0 0 5px var(--pip-color); cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 0 6px var(--pip-color-dim);
+        }
+        .map-overlay-btn:active { background: var(--pip-color); color: var(--pip-bg); text-shadow: none; }

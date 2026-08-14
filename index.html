@@ -54,15 +54,11 @@
         <div style="display: flex; flex-direction: column;">
             <div style="display: flex; align-items: baseline; gap: 10px;">
                 <span class="header-title" id="main-os-title">POX-BOY 3026</span>
-                <span style="font-size: 0.8rem; opacity: 0.5;">v0.57</span>
+                <span style="font-size: 0.8rem; opacity: 0.5;">v0.58</span>
             </div>
-            <!-- v0.57 (user: header was growing a line per glyph): clock + radio/sat glyphs + batt ride ONE horizontal strip, mobile-signal style -- the header never grows taller -->
-            <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 2px; flex-wrap: nowrap;">
-                <span id="pip-clock" style="font-size: 0.9rem; opacity: 0.8;"></span>
-                <span id="hud-radio" style="font-size: 0.95rem; display: none; text-shadow: 0 0 5px currentColor;">♪</span>
-                <span id="hud-sat" style="font-size: 0.95rem; opacity: 0.3; color: var(--pip-color-dim); text-shadow: 0 0 5px currentColor;">⌖</span>
-                <span id="pip-batt" style="font-size: 0.9rem; opacity: 0.8; display: none;"></span>
-            </div>
+            <span id="pip-clock" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px;"></span>
+            <div style="display: flex; gap: 10px; align-items: center; margin-top: 2px;"><span id="hud-radio" style="font-size: 0.95rem; margin-right: 4px; display: none; text-shadow: 0 0 5px currentColor;">♪</span><span id="hud-sat" style="font-size: 0.95rem; margin-right: 4px; opacity: 0.3; color: var(--pip-color-dim); text-shadow: 0 0 5px currentColor;">⌖</span></div>
+            <span id="pip-batt" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px; display: none;"></span>
         </div>
         <div class="header-controls">
         </div>
@@ -87,9 +83,8 @@
             <div class="sub-nav" id="stat-sub-nav">
                 <div class="sub-nav-item active" onclick="switchSubTab('stat', 'status')">STATUS</div>
                 <div class="sub-nav-item" onclick="switchSubTab('stat', 'special')">S.P.E.C.I.A.L.</div>
-                <div class="sub-nav-item" onclick="switchSubTab('stat', 'skills')">SKILLS</div>
-                <div class="sub-nav-item" onclick="switchSubTab('stat', 'perks')">PERKS</div>
                 <div class="sub-nav-item" onclick="switchSubTab('stat', 'stats')">STATS</div>
+                <div class="sub-nav-item" onclick="switchSubTab('stat', 'options')">OPTIONS</div>
             </div>
 
             <!-- STATUS -->
@@ -122,46 +117,71 @@
                     <div style="font-weight: bold;" id="status-ap-val">100 / 100</div>
                 </div>
                 
-                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--pip-color-dim); padding-bottom: 5px; margin-bottom: 5px;">
-                    <div style="font-weight: bold;">RADIATION LEVEL</div>
-                    <div style="font-weight: bold; color: #ffb642;" id="status-rads-val">0 RADS</div>
-                </div>
+                <!-- v0.58: RADIATION LEVEL row removed — already shown in HP/RADS bar + footer -->
             </div>
 
-            <!-- SPECIAL -->
+            <!-- SPECIAL (v0.58: merged with SKILLS + PERKS — one scrollable page) -->
             <div id="sub-stat-special" class="sub-tab-content">
                 <h2>ATTRIBUTES</h2><br>
                 <div class="special-list" id="special-list-display">
                     <!-- Populated by JS -->
                 </div>
-            </div>
-
-            <!-- SKILLS -->
-            <div id="sub-stat-skills" class="sub-tab-content">
-                <h2>POX ECLIPSE SURVIVAL SKILLS</h2><br>
+                <h2 style="margin-top: 25px;">SURVIVAL SKILLS</h2><br>
                 <div class="skills-list" id="skills-list-display">
                     <!-- Populated by JS -->
                 </div>
-            </div>
-
-            <!-- PERKS -->
-            <div id="sub-stat-perks" class="sub-tab-content">
-                <h2>PERKS</h2><br>
+                <h2 style="margin-top: 25px;">PERKS</h2><br>
                 <div id="perks-list-display">
                     <!-- Populated by JS -->
                 </div>
             </div>
 
+            <!-- SKILLS and PERKS removed as standalone tabs (v0.58: merged into SPECIAL above) -->
+
             <!-- STATS (v0.53: relocated from DATA; hosts OVERSEER pariah/zone panels) -->
             <div id="sub-stat-stats" class="sub-tab-content">
                 <div id="stats-general">
                     <h2>GENERAL STATS</h2><br>
-                    <p>LOCATIONS DISCOVERED: 1</p>
-                    <p>DAYS PASSED: 0</p>
-                    <p>NUKA-COLAS DRUNK: 0</p>
+                    <p id="fs-field-status" style="color: inherit;">FIELD STATUS: OPEN WASTES</p>
+                    <p>LOCATIONS DISCOVERED: <span id="fs-locations">1</span></p>
+                    <p>DAYS PASSED: <span id="fs-days">0</span></p>
+                    <p>QUESTS COMPLETED: <span id="fs-quests">0</span></p>
+                    <p>WASTELANDERS MET: <span id="fs-wastelanders">0</span></p>
+                    <p>TRANSMISSIONS SENT: <span id="fs-tx-sent">0</span></p>
+                    <p>PHOTOS ARCHIVED: <span id="fs-photos">0</span></p>
+                </div>
+                <div id="stats-wild" style="margin-top: 20px; border-top: 1px dashed var(--pip-color-dim); padding-top: 15px;">
+                    <h2 style="color: #ffb642; text-shadow: 0 0 6px #ffb642;">WASTELAND RECORD</h2><br>
+                    <p>TOTAL RADS ABSORBED: <span id="fs-rads-total" style="color: #ff3333;">0</span></p>
+                    <p>DISTANCE TRAVELLED: <span id="fs-distance">0.0 KM</span></p>
+                    <p>GEIGER READINGS: <span id="fs-geiger">0</span></p>
+                    <p>PEANUTS STOLEN: <span id="fs-peanuts" style="color: #ffb642;">0</span></p>
+                    <p>RATS CAUGHT BY THE TAIL: <span id="fs-rats">0</span></p>
+                    <p>TIMES NEAR DEATH: <span id="fs-neardth" style="color: #ff3333;">0</span></p>
+                    <p>ENCLAVE MARCHES ENDURED: <span id="fs-marches">0</span></p>
+                    <p>PHOTOGRAPHS REGRETTED: <span id="fs-regret">0</span></p>
                 </div>
                 <!-- v0.46: OVERSEER PARIAH CONTROL — rendered by renderStatsTab, dev-mode only -->
                 <div id="overseer-pariahs" style="display:none; margin-top:25px;"></div>
+            </div>
+
+            <!-- OPTIONS (v0.58: moved from DATA to STAT) -->
+            <div id="sub-stat-options" class="sub-tab-content">
+                <h2>APP OPTIONS</h2><br>
+                <button class="pip-btn" id="options-fs-btn" onclick="toggleFullscreen()" style="border-style: dashed;">[FULLSCREEN]</button>
+                <button class="pip-btn" id="options-size-btn" onclick="cycleSize()" style="border-style: dashed;">[SIZE: SHRINK 2]</button>
+                <button class="pip-btn" id="options-theme-btn" onclick="cycleTheme()" style="border-style: dashed;">[THEME: GREEN]</button>
+                <button class="pip-btn" id="options-export-btn" onclick="cycleAutoExport()" style="border-style: dashed;">[AUTO-EXPORT: OFF]</button>
+                <button class="pip-btn" id="options-ping-btn" onclick="cycleMailPing()" style="border-style: dashed;">[MAIL PING: ON]</button>
+                <button class="pip-btn" id="options-pingtest-btn" onclick="testMailPing()" style="border-style: dashed;">[ TEST PING ]</button>
+                <button class="pip-btn" id="options-text-btn" onclick="cycleTextSize()" style="border-style: dashed;">[TEXT: NORMAL]</button>
+                <button class="pip-btn" id="options-nmsg-btn" onclick="cycleNotify('msg','options-nmsg-btn','MESSAGES')" style="border-style: dashed;">[NOTIFY MESSAGES: ON]</button>
+                <button class="pip-btn" id="options-ncon-btn" onclick="cycleNotify('contract','options-ncon-btn','CONTRACTS')" style="border-style: dashed;">[NOTIFY CONTRACTS: ON]</button>
+                <button class="pip-btn" id="options-wire-btn" onclick="cycleWireAlerts()" style="border-style: dashed;">[WIRE ALERTS: ON]</button>
+                <button class="pip-btn" id="options-nlnk-btn" onclick="cycleNotify('link','options-nlnk-btn','LINKS')" style="border-style: dashed;">[NOTIFY LINKS: ON]</button>
+                <button class="pip-btn" id="options-vibrate-btn" onclick="cycleVibrate()" style="border-style: dashed;">[VIBRATE: ON]</button>
+                <button class="pip-btn" id="options-scrambler-btn" onclick="toggleScrambler()" style="border-style: dashed; border-color: #ffb642; color: #ffb642;">[BEACON SCRAMBLER: OFF]</button>
+                <p style="font-size: 0.9rem; opacity: 0.7; margin-top: 15px; line-height: 1.4;">PADDING cycles MAX / SHRINK 1 / SHRINK 2 and persists. THEME tints the phosphor, map and optics. AUTO-EXPORT also files every shot to your gallery-indexed download folder the moment it's taken. MAIL PING buzzes the OS on new transmissions (silent while you're already reading mail). TEXT cycles font size NORMAL / LARGE / XL and persists. THIS UNIT IS PORTRAIT-ONLY: the display re-aligns itself automatically on any device that lets it. FULLSCREEN works on any device that supports it — on iPhone it lives behind "ADD TO HOME SCREEN" instead. Hidden when the OS already locks immersion. NOTIFY MESSAGES / CONTRACTS / LINKS choose which transmission alerts toast and ping — LINKS off parks datacard scans quietly as a MAIL tab row. BEACON SCRAMBLER makes every other unit see your dot at a fixed decoy site (long-press the map > SET DECOY SITE to move it) — handy for pre-event testing; your own rads, zones and healing still run off your REAL position. Long messages: the keyboard field stretches as you type (ENTER still commits), and tapping any TRANSMISSIONS row opens the full text with its photo. WIRE ALERTS push OVERSEER announcements to this device's OS notices; the amber banner up top carries the latest wire until you tap it away. The two header glyphs are your signal strip: ♪ = radio live (amber when synced), ⌖ = satellite lock (amber locked, red-blink holding, dim off).</p>
             </div>
         </div>
 
@@ -187,30 +207,9 @@
                 <div class="sub-nav-item" onclick="switchSubTab('data', 'contracts')">CONTRACTS</div>
                 <div class="sub-nav-item" onclick="switchSubTab('data', 'wastelanders')">WASTELANDERS</div>
                 <div class="sub-nav-item" onclick="switchSubTab('data', 'factions')">FACTIONS</div>
-                <div class="sub-nav-item" onclick="switchSubTab('data', 'options')">OPTIONS</div>
             </div>
 
-            <!-- APP OPTIONS (settings moved out of the header, v0.33) -->
-            <div id="sub-data-options" class="sub-tab-content">
-                <h2>APP OPTIONS</h2><br>
-                <button class="pip-btn" id="options-fs-btn" onclick="toggleFullscreen()" style="border-style: dashed;">[FULLSCREEN]</button>
-                <button class="pip-btn" id="options-size-btn" onclick="cycleSize()" style="border-style: dashed;">[SIZE: SHRINK 2]</button>
-                <button class="pip-btn" id="options-theme-btn" onclick="cycleTheme()" style="border-style: dashed;">[THEME: GREEN]</button>
-                <button class="pip-btn" id="options-export-btn" onclick="cycleAutoExport()" style="border-style: dashed;">[AUTO-EXPORT: OFF]</button>
-                <button class="pip-btn" id="options-ping-btn" onclick="cycleMailPing()" style="border-style: dashed;">[MAIL PING: ON]</button>
-                <button class="pip-btn" id="options-pingtest-btn" onclick="testMailPing()" style="border-style: dashed;">[ TEST PING ]</button>
-                <button class="pip-btn" id="options-text-btn" onclick="cycleTextSize()" style="border-style: dashed;">[TEXT: NORMAL]</button>
-                <!-- v0.45: per-category transmission alert switches (toast + OS ping each) -->
-                <button class="pip-btn" id="options-nmsg-btn" onclick="cycleNotify('msg','options-nmsg-btn','MESSAGES')" style="border-style: dashed;">[NOTIFY MESSAGES: ON]</button>
-                <button class="pip-btn" id="options-ncon-btn" onclick="cycleNotify('contract','options-ncon-btn','CONTRACTS')" style="border-style: dashed;">[NOTIFY CONTRACTS: ON]</button>
-                <button class="pip-btn" id="options-wire-btn" onclick="cycleWireAlerts()" style="border-style: dashed;">[WIRE ALERTS: ON]</button>
-                <button class="pip-btn" id="options-nlnk-btn" onclick="cycleNotify('link','options-nlnk-btn','LINKS')" style="border-style: dashed;">[NOTIFY LINKS: ON]</button>
-                <!-- v0.48: haptics master — UI toasts no longer push to the OS at all -->
-                <button class="pip-btn" id="options-vibrate-btn" onclick="cycleVibrate()" style="border-style: dashed;">[VIBRATE: ON]</button>
-                <!-- v0.52: privacy decoy — other units see your dot at the decoy site, your unit keeps the real fix -->
-                <button class="pip-btn" id="options-scrambler-btn" onclick="toggleScrambler()" style="border-style: dashed; border-color: #ffb642; color: #ffb642;">[BEACON SCRAMBLER: OFF]</button>
-                <p style="font-size: 0.9rem; opacity: 0.7; margin-top: 15px; line-height: 1.4;">PADDING cycles MAX / SHRINK 1 / SHRINK 2 and persists. THEME tints the phosphor, map and optics. AUTO-EXPORT also files every shot to your gallery-indexed download folder the moment it's taken. MAIL PING buzzes the OS on new transmissions (silent while you're already reading mail). TEXT cycles font size NORMAL / LARGE / XL and persists. THIS UNIT IS PORTRAIT-ONLY: the display re-aligns itself automatically on any device that lets it. FULLSCREEN works on any device that supports it — on iPhone it lives behind "ADD TO HOME SCREEN" instead. Hidden when the OS already locks immersion. NOTIFY MESSAGES / CONTRACTS / LINKS choose which transmission alerts toast and ping — LINKS off parks datacard scans quietly as a MAIL tab row. BEACON SCRAMBLER makes every other unit see your dot at a fixed decoy site (long-press the map > SET DECOY SITE to move it) — handy for pre-event testing; your own rads, zones and healing still run off your REAL position. Long messages: the keyboard field stretches as you type (ENTER still commits), and tapping any TRANSMISSIONS row opens the full text with its photo. WIRE ALERTS push OVERSEER announcements to this device's OS notices; the amber banner up top carries the latest wire until you tap it away. The two header glyphs are your signal strip: ♪ = radio live (amber when synced), ⌖ = satellite lock (amber locked, red-blink holding, dim off).</p>
-            </div>
+            <!-- APP OPTIONS moved to STAT > OPTIONS (v0.58) -->
 
             <!-- CONTRACTS (v0.44): quests YOU issued, with live recipient statuses -->
             <div id="sub-data-contracts" class="sub-tab-content">
@@ -256,6 +255,11 @@
                     <div id="map-container"></div>
                     <!-- v0.56: live signal census -- the empty-map question now has a number -->
                     <div id="map-signals" style="position: absolute; top: 6px; left: 6px; z-index: 800; font-size: 0.75rem; padding: 2px 8px; border: 1px dashed var(--pip-color-dim); background: rgba(5,16,5,0.85); opacity: 0.9;">SIGNALS: --</div>
+                    <!-- v0.58: map camera overlay buttons — compact glyphs in the corner -->
+                    <div id="map-cam-overlay" style="position: absolute; bottom: 8px; right: 8px; z-index: 800; display: flex; gap: 4px;">
+                        <button class="map-overlay-btn" onclick="mapGoMe()" title="Center on me">◎</button>
+                        <button class="map-overlay-btn" onclick="mapFitAll()" title="Fit all">⛶</button>
+                    </div>
                     <!-- Sticky-select wastelander info card (tap a beacon) -->
                     <div id="map-user-card" style="display: none; position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 1000; background: rgba(5, 16, 5, 0.95); border: 2px solid var(--pip-color); box-shadow: 0 0 12px var(--pip-color-dim); padding: 10px;">
                         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -400,11 +404,7 @@
                 <button class="theme-btn" id="dev-add-marker-btn" onclick="openAddWaypointModal()" style="display: none;">+ ADD MARKER</button>
                 <button class="theme-btn" id="dev-remove-marker-btn" onclick="openRemoveWaypointModal()" style="border-style: dashed; display: none;">- REMOVE MARKER</button>
             </div>
-            <!-- v0.55: camera orders are explicit now (the map no longer yanks to your face) -->
-            <div id="map-cam-controls" style="display: none; justify-content: center; gap: 10px;">
-                <button class="theme-btn" onclick="mapGoMe()" style="border-style: dashed;">[&nbsp;◎ ME&nbsp;]</button>
-                <button class="theme-btn" onclick="mapFitAll()" style="border-style: dashed;">[&nbsp;⛶ FIT ALL&nbsp;]</button>
-            </div>
+            <!-- v0.58: map camera controls moved to overlay on the map itself -->
             <div id="dev-controls" style="display: none; justify-content: center; gap: 10px;">
                 <button class="theme-btn" onclick="triggerDevReset()" style="border-color: #ff3333; color: #ff3333;">FACTORY RESET</button>
                 <button class="theme-btn" onclick="toggleDevMode()" style="border-color: #42b6ff; color: #42b6ff;">TOGGLE OVERSEER</button>
@@ -476,7 +476,6 @@
                  from the LOADOUT can ride the letter -->
             <div style="display:flex; gap:8px; margin-bottom:10px;">
                 <button class="pip-btn" id="cm-photo-btn" onclick="attachComposerPhoto()" style="flex:1; border-style:dashed; font-size:1rem; margin:0;">[+ PHOTO]</button>
-                <button class="pip-btn" onclick="quickCamOpen()" style="flex:1; border-style:dashed; font-size:1rem; margin:0;">[📷 SNAP NOW]</button>
             </div>
             <div id="cm-attach-note" style="display:none; font-size:1rem; opacity:0.8; margin-bottom:8px;"></div>
             <button class="pip-btn" onclick="transmitMsg()">[ SEND TRANSMISSION ]</button>
@@ -484,16 +483,7 @@
         </div>
     </div>
 
-    <!-- v0.56: in-composer quick capture (snap a shot straight into the draft) -->
-    <div id="quickcam-modal" class="modal-overlay" style="z-index: 140;">
-        <div class="modal-content" style="text-align: center;">
-            <h3>QUICK CAPTURE</h3>
-            <video id="qc-video" autoplay playsinline muted style="width: 100%; max-height: 50vh; border: 2px solid var(--pip-color); margin-bottom: 10px; background: #000;"></video>
-            <canvas id="qc-canvas" style="display: none;"></canvas>
-            <button class="pip-btn" onclick="quickCamSnap()">[ ◉ SNAP + ATTACH ]</button>
-            <button class="pip-btn" onclick="quickCamClose()" style="margin-top: 10px; border-style: dashed;">CANCEL</button>
-        </div>
-    </div>
+    <!-- v0.58: quickcam removed (SNAP NOW never worked reliably; too many permission/modal conflicts) -->
 
     <!-- COMPOSE ITEM MODAL -->
     <div id="compose-item-modal" class="modal-overlay" style="z-index: 125;">
@@ -696,8 +686,6 @@
             <img id="cp-img" alt="" style="display:none; max-width:100%; max-height:35vh; object-fit:contain; margin:0 auto 10px; border:1px solid var(--pip-color);">
             <!-- v0.45: long messages scroll inside the box (pre-line honors \n) so buttons never get pushed off-screen -->
             <p id="cp-text" style="margin: 25px 0; font-size: 1.4rem; font-weight: bold; white-space: pre-line; max-height: 40vh; overflow-y: auto;"></p>
-            <!-- v0.57: optional tap-stepper row (zone SET RANGE, later bounty payouts) -- populated/shown by showCustomPrompt only when a prompt passes a stepper config -->
-            <div id="cp-stepper" style="display: none; margin: -10px 0 18px; justify-content: center; align-items: center; gap: 6px; flex-wrap: wrap;"></div>
             <div id="cp-buttons" style="display: flex; gap: 10px; justify-content: center; flex-direction: column;">
                 <!-- Buttons injected by JS -->
             </div>
@@ -739,8 +727,8 @@
 
             <!-- v0.50: OVERSEER zone placement — same long-press flow, true 15m fences drawn on every unit -->
             <div id="wp-overseer-zones" style="display:none; margin-bottom:12px;">
-                <button class="pip-btn" onclick="dropHotZone('map')" style="border-color:#ff3333; color:#ff3333; margin-bottom:8px;">[☢ HOT ZONE HERE]</button>
-                <button class="pip-btn" onclick="dropMedZone('map')" style="border-color:#5fc98e; color:#5fc98e;">[✚ MED ZONE HERE]</button>
+                <button class="pip-btn" onclick="dropHotZone('map')" style="border-color:#ff3333; color:#ff3333; margin-bottom:8px;">[☢ HOT ZONE HERE (15M)]</button>
+                <button class="pip-btn" onclick="dropMedZone('map')" style="border-color:#5fc98e; color:#5fc98e;">[✚ MED ZONE HERE (15M)]</button>
             </div>
 
             <button class="pip-btn" onclick="saveNewWaypoint()">SAVE MARKER</button>
@@ -867,7 +855,7 @@
     <div id="pre-boot-overlay" class="modal-overlay" style="z-index: 250; background: var(--pip-bg); flex-direction: column; display: none;">
         <!-- Version Tag & Dev Skip Button -->
         <div style="position: absolute; top: 10px; right: 10px; z-index: 260; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-            <span style="font-size: 0.8rem; opacity: 0.5;">v0.57</span>
+            <span style="font-size: 0.8rem; opacity: 0.5;">v0.58</span>
             <button class="pip-btn" onclick="devSkipToApp()" style="font-size: 0.7rem; padding: 2px 5px; border: none; color: #ff3333; opacity: 0.5;">[DEV: FAST BOOT]</button>
         </div>
         
@@ -889,7 +877,7 @@
 
     <!-- BOOT SPLASH SCREEN -->
     <div id="boot-splash" class="modal-overlay" style="z-index: 200; background: var(--pip-bg); flex-direction: column; display: flex;">
-        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.57</span>
+        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.58</span>
         <div class="crt" style="position: absolute; top:0; left:0; right:0; bottom:0; pointer-events: none; z-index: 201;"></div>
         <div style="z-index: 202; width: 100%; max-width: 600px; padding: 20px; text-align: left; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; justify-content: flex-end;" id="boot-text-container">
             <p id="boot-log-1" style="margin-bottom: 5px; display: none; font-size: 1rem;">ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM</p>
