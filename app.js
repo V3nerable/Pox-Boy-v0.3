@@ -200,23 +200,20 @@
             radsTotal: 0,        // lifetime rads absorbed (incremented in adjustRads for positive deltas)
             distance: 0,         // km travelled (incremented in GPS fix handler)
             geiger: 0,           // geiger burst count
-            peanuts: 0,          // peanuts stolen (pure fun — random seed on first boot)
-            rats: 0,             // rats caught by the tail (pure fun)
+            questsCompleted: 0,  // quests marked complete
+            questsAbandoned: 0,  // quests abandoned
+            steals: 0,           // steal-type quests completed
+            fetches: 0,          // fetch-type quests completed
+            assists: 0,          // assist-type quests completed
             nearDeath: 0,        // times HP dropped below 20%
             marches: 0,          // enclave marches endured (radio enclave track plays)
-            regret: 0            // photographs regretted (pure fun — random seed)
+            regret: 0            // photographs deleted from databank
         };
         (function loadFunStats() {
             try {
                 const saved = JSON.parse(localStorage.getItem('pipboy-funstats') || 'null');
                 if (saved) { for (let k in saved) { if (funStats.hasOwnProperty(k)) funStats[k] = saved[k]; } }
-                // First-boot random seeds for the silly counters
-                if (!saved || saved.peanuts === undefined) {
-                    funStats.peanuts = Math.floor(Math.random() * 12);
-                    funStats.rats = Math.floor(Math.random() * 5);
-                    funStats.regret = Math.floor(Math.random() * 3);
-                    saveFunStats();
-                }
+                // v0.63: no more random pre-fill — all stats tracked from actual gameplay
             } catch (e) {}
         })();
         function saveFunStats() {
@@ -257,7 +254,11 @@
             // Wild / cumulative stats
             if (el('fs-rads-total')) el('fs-rads-total').innerText = funStats.radsTotal;
             if (el('fs-distance')) el('fs-distance').innerText = (funStats.distance / 1000).toFixed(1) + ' KM';
-            if (el('fs-peanuts')) el('fs-peanuts').innerText = funStats.peanuts;
+            if (el('fs-quests-completed')) el('fs-quests-completed').innerText = funStats.questsCompleted;
+            if (el('fs-quests-abandoned')) el('fs-quests-abandoned').innerText = funStats.questsAbandoned;
+            if (el('fs-steals')) el('fs-steals').innerText = funStats.steals;
+            if (el('fs-fetches')) el('fs-fetches').innerText = funStats.fetches;
+            if (el('fs-assists')) el('fs-assists').innerText = funStats.assists;
             if (el('fs-neardth')) el('fs-neardth').innerText = funStats.nearDeath;
             if (el('fs-marches')) el('fs-marches').innerText = funStats.marches;
             if (el('fs-regret')) el('fs-regret').innerText = funStats.regret;
@@ -1042,9 +1043,12 @@
 
         function updateClock() {
             const now = new Date();
-            const dateStr = now.toLocaleDateString();
-            const timeStr = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false});
-            document.getElementById('pip-clock').innerText = `DATE: ${dateStr} - TIME: ${timeStr}`;
+            const day = String(now.getDate()).padStart(2, '0');
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const year = String(now.getFullYear() - 2000 + 3000).slice(-2); // 2026 → 3026
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            document.getElementById('pip-clock').innerText = `${day}/${month}/${year} ${hours}:${minutes}`;
             
             // Easter Egg: OS Name Glitch
             glitchTimer++;
@@ -2119,6 +2123,12 @@
                     label: "YES, COMPLETE QUEST",
                     action: () => {
                         quest.completed = true;
+                        // v0.63: track quest completion in fun stats
+                        bumpFunStat('questsCompleted', 1);
+                        // Track quest type if available (steal/fetch/assist)
+                        if (quest.type === 'STEAL') bumpFunStat('steals', 1);
+                        else if (quest.type === 'FETCH') bumpFunStat('fetches', 1);
+                        else if (quest.type === 'ASSIST') bumpFunStat('assists', 1);
                         // v0.31: player-issued CONTRACTs write fulfillment back to the
                         // original mailbox letter so the GIVER's outbox flips to
                         // "CONTRACT FULFILLED" on their next outbox status refresh.
@@ -2161,6 +2171,8 @@
             const quest = quests.find(q => q.id === activeQuestId);
             if (quest) {
                 quest.abandoned = true;
+                // v0.63: track quest abandonment in fun stats
+                bumpFunStat('questsAbandoned', 1);
                 saveToStorage();
                 renderQuests();
                 closeModals();
@@ -2626,10 +2638,12 @@
             sharedPinsGroup = L.layerGroup().addTo(pipMap); // v0.38 broadcast marker board
             radZonesGroup = L.layerGroup().addTo(pipMap);   // v0.47 Overseer hot zones
             renderMarkers();
-            // v0.52: if GPS auto-armed before the map ever initialised, our dot was
-            // deferred (no markersGroup to draw into) -- draw it now.
-            if (gpsWatchId !== null && myLastLat !== null && myLastLng !== null && !userMarker) ensureUserMarker(myLastLat, myLastLng);
-            else if (!userMarker && myLastLat !== null && myLastLng !== null) ensureUserMarker(myLastLat, myLastLng, true); // v0.56: cold-persisted dot
+            // v0.63: ALWAYS show user marker on map open if we have coordinates
+            // Live (solid) if GPS enabled, cold (dashed) if disabled but we have last known
+            if (myLastLat !== null && myLastLng !== null && !userMarker) {
+                const isLive = gpsWatchId !== null;
+                ensureUserMarker(myLastLat, myLastLng, !isLive);
+            }
             // v0.53 ZONE FIX (user: "zones disappeared from the map but still in the remove
             // list"): radzones/ fires at comms boot, mapless, so its first emission was
             // guard-swallowed and nothing EVER re-rendered zones on map open -- they only
@@ -2704,6 +2718,7 @@
                     // Live-refresh the pinned card as beacons stream in
                     if (selectedBeaconUid) updateMapUserCard();
                     updateHud(); // v0.56
+                    renderWastelandersListMap(); // v0.63: update scrollable wastelanders list below map
                 });
 
                 // v0.38: watch the shared pins board (read is open to everyone per rules)
@@ -2737,7 +2752,8 @@
                 const p = lastKnownSharedPins[key];
                 if (!p || typeof p.lat !== 'number' || typeof p.lng !== 'number') return;
                 if (p.from && myMailUid && p.from === myMailUid) return; // v0.46: self-echo filter — your LOCAL marker already is your view of your broadcast; the diamond is for everyone else
-                if (!p.ts || (now - p.ts) > 72 * 60 * 60 * 1000) return; // stale: skip
+                // v0.63: only prune non-permanent pins (overseer-broadcast pins have permanent:true)
+                if (!p.permanent && (!p.ts || (now - p.ts) > 72 * 60 * 60 * 1000)) return; // stale: skip
                 const who = p.fromName ? (' — VIA ' + String(p.fromName).toUpperCase()) : '';
                 const pm = L.marker([p.lat, p.lng], {icon: sharedIcon, zIndexOffset: 500})
                     .bindTooltip(String(p.label || 'SHARED MARKER').toUpperCase() + who, {
@@ -2805,6 +2821,49 @@
             else if (selectedZoneKey) updateZoneCard();
         }
 
+        // v0.63: render scrollable list of live wastelanders below map
+        function renderWastelandersListMap() {
+            const el = document.getElementById('wastelanders-scroll');
+            if (!el) return;
+            const now = Date.now();
+            const myUid = localStorage.getItem('pipboy-uid');
+            const live = [];
+            Object.keys(lastKnownBeaconData || {}).forEach(uid => {
+                if (uid === myUid) return; // skip self
+                const b = lastKnownBeaconData[uid];
+                if (!b || !b.timestamp) return;
+                const ageMin = Math.floor((now - b.timestamp) / 60000);
+                if (ageMin > 5) return; // only live (< 5 min)
+                const dist = (myLastLat !== null && typeof b.lat === 'number') ? getDistance(myLastLat, myLastLng, b.lat, b.lng) : null;
+                live.push({ uid, name: b.name || 'UNKNOWN', lat: b.lat, lng: b.lng, ageMin, dist });
+            });
+            // Sort by distance (closest first), unknown distance at end
+            live.sort((a, b) => {
+                if (a.dist === null && b.dist === null) return 0;
+                if (a.dist === null) return 1;
+                if (b.dist === null) return -1;
+                return a.dist - b.dist;
+            });
+            if (!live.length) {
+                el.innerHTML = '<p style="opacity: 0.5; font-size: 0.85rem;">No live signals</p>';
+                return;
+            }
+            el.innerHTML = live.map(w => {
+                const distStr = w.dist !== null ? (w.dist < 1000 ? Math.round(w.dist) + 'm' : (w.dist / 1000).toFixed(1) + 'km') : '—';
+                return `<div style="padding: 6px 0; border-bottom: 1px dashed var(--pip-color-dim); cursor: pointer;" onclick="mapGoToWastelander('${w.uid}', ${w.lat}, ${w.lng})">
+                    <div style="font-weight: bold;">${escapeHtml(w.name)}</div>
+                    <div style="font-size: 0.8rem; opacity: 0.7;">${distStr} · LKL ${w.ageMin}m ago</div>
+                </div>`;
+            }).join('');
+        }
+
+        // v0.63: center map on a wastelander from the list
+        function mapGoToWastelander(uid, lat, lng) {
+            if (!pipMap || typeof lat !== 'number' || typeof lng !== 'number') return;
+            pipMap.setView([lat, lng], Math.max(pipMap.getZoom(), 16));
+            selectBeacon(uid);
+        }
+
         function renderMarkers() {
             if (!pipMap || !markersGroup) return;
             markersGroup.clearLayers();
@@ -2834,6 +2893,11 @@
         function mapGoMe() {
             if (!pipMap) return;
             if (myLastLat === null || myLastLng === null) { showNotification('NO POSITION FIX -- ENABLE GPS TRACKING.'); return; }
+            // v0.63: ensure marker exists when centering
+            if (!userMarker) {
+                const isLive = gpsWatchId !== null;
+                ensureUserMarker(myLastLat, myLastLng, !isLive);
+            }
             pipMap.setView([myLastLat, myLastLng], Math.max(pipMap.getZoom(), 16));
         }
         function mapFitAll() {
@@ -2867,14 +2931,16 @@
             closeModals();
             // v0.38: offer to sync the new marker out to every other Pip-Boy (opt-in per
             // marker -- silent auto-broadcast of every scribble would flood the board)
+            // v0.63: overseers can mark broadcasts as permanent (no 72h prune)
+            const isOverseer = localStorage.getItem('pipboy-dev-mode') === 'true';
             showCustomPrompt('MARKER SAVED. BROADCAST "' + wp.name + '" TO ALL WASTELANDERS?', [
-                { label: 'SHARE WITH EVERYONE', action: () => broadcastWaypoint(wp) },
+                { label: 'SHARE WITH EVERYONE' + (isOverseer ? ' (PERMANENT)' : ''), action: () => broadcastWaypoint(wp, isOverseer) },
                 { label: 'KEEP PRIVATE', color: 'var(--pip-color-dim)', action: () => {} }
             ]);
         }
 
         // v0.38: push one marker onto the sharedpins/ board for every client to draw
-        function broadcastWaypoint(wp) {
+        function broadcastWaypoint(wp, permanent) {
             if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- MARKER STAYS LOCAL.'); return; }
             const key = 'p' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
             const pin = {
@@ -2883,10 +2949,11 @@
                 lng: wp.lng,
                 from: myMailUid || 'ANON',
                 fromName: String(userProfile.name || 'UNKNOWN').toUpperCase().substring(0, 32),
-                ts: Date.now()
+                ts: Date.now(),
+                permanent: !!permanent // v0.63: overseer-broadcast pins persist indefinitely
             };
             window.firebaseSet(window.firebaseRef(window.db, 'sharedpins/' + key), pin)
-                .then(() => showNotification('MARKER BROADCAST TO ALL WASTELANDERS.'))
+                .then(() => showNotification(permanent ? 'MARKER BROADCAST TO ALL WASTELANDERS (PERMANENT).' : 'MARKER BROADCAST TO ALL WASTELANDERS.'))
                 .catch(() => showNotification('BROADCAST FAILED -- MARKER STAYS LOCAL.'));
         }
 
@@ -3203,7 +3270,107 @@
                 return;
             }
             pariahEl.style.display = 'block';
-            pariahEl.innerHTML = renderPariahPanel();
+            pariahEl.innerHTML = renderPariahPanel() + renderOverseerUserManagement();
+        }
+
+        // v0.63: overseer user management — view ALL users who have EVER broadcast, remove dead ones
+        function renderOverseerUserManagement() {
+            let html = '<h3 style="color:#ffb642; text-shadow:0 0 6px #ffb642; margin-top:20px;">USER MANAGEMENT</h3>';
+            html += '<p style="font-size:0.9rem; opacity:0.75; margin-bottom:10px;">ALL USERS WHO HAVE EVER BROADCAST (OVERSEER ONLY)</p>';
+            html += '<div id="overseer-users-list" style="max-height:300px; overflow-y:auto; border:1px dashed var(--pip-color-dim); padding:10px;">';
+            html += '<p style="opacity:0.5;">Loading...</p>';
+            html += '</div>';
+            html += '<button class="pip-btn" onclick="loadOverseerUsers()" style="margin-top:10px; border-style:dashed;">[REFRESH USER LIST]</button>';
+            html += '<button class="pip-btn" onclick="removeDeadOverseerUsers()" style="margin-top:10px; border-color:#ff3333; color:#ff3333; border-style:dashed;">[REMOVE ALL DEAD USERS]</button>';
+            return html;
+        }
+
+        // v0.63: load all users from Firebase for overseer management
+        function loadOverseerUsers() {
+            const el = document.getElementById('overseer-users-list');
+            if (!el || !window.db) {
+                if (el) el.innerHTML = '<p style="opacity:0.5;">No database connection</p>';
+                return;
+            }
+            el.innerHTML = '<p style="opacity:0.5;">Loading...</p>';
+            const usersRef = window.firebaseRef(window.db, 'wastelanders/');
+            window.firebaseGet(usersRef).then(snap => {
+                const data = snap.val() || {};
+                const now = Date.now();
+                const staleThreshold = 7 * 24 * 60 * 60 * 1000; // 7 days
+                const users = Object.keys(data).map(uid => {
+                    const u = data[uid];
+                    const age = u.timestamp ? (now - u.timestamp) : null;
+                    const isDead = age === null || age > staleThreshold;
+                    return { uid, name: u.name || 'UNKNOWN', timestamp: u.timestamp, age, isDead };
+                }).sort((a, b) => {
+                    if (a.isDead && !b.isDead) return 1;
+                    if (!a.isDead && b.isDead) return -1;
+                    return (a.name || '').localeCompare(b.name || '');
+                });
+                if (!users.length) {
+                    el.innerHTML = '<p style="opacity:0.5;">No users found</p>';
+                    return;
+                }
+                const deadCount = users.filter(u => u.isDead).length;
+                let html = '<p style="margin-bottom:10px;">' + users.length + ' total users, ' + deadCount + ' dead (>7 days)</p>';
+                users.forEach(u => {
+                    const ageStr = u.age !== null ? (u.age < 60000 ? Math.floor(u.age / 1000) + 's ago' : u.age < 3600000 ? Math.floor(u.age / 60000) + 'm ago' : u.age < 86400000 ? Math.floor(u.age / 3600000) + 'h ago' : Math.floor(u.age / 86400000) + 'd ago') : 'never';
+                    html += '<div style="padding:6px 0; border-bottom:1px dashed var(--pip-color-dim); opacity:' + (u.isDead ? '0.5' : '1') + ';">';
+                    html += '<div style="font-weight:bold;">' + escapeHtml(u.name) + (u.isDead ? ' <span style="color:#ff3333;">[DEAD]</span>' : '') + '</div>';
+                    html += '<div style="font-size:0.8rem; opacity:0.7;">UID: ' + u.uid.substring(0, 8) + '... · Last seen: ' + ageStr + '</div>';
+                    html += '</div>';
+                });
+                el.innerHTML = html;
+            }).catch(err => {
+                el.innerHTML = '<p style="color:#ff3333;">Error loading users: ' + escapeHtml(String(err)) + '</p>';
+            });
+        }
+
+        // v0.63: remove all dead users (>7 days) from Firebase
+        function removeDeadOverseerUsers() {
+            if (!window.db) {
+                showNotification('No database connection');
+                return;
+            }
+            const staleThreshold = 7 * 24 * 60 * 60 * 1000; // 7 days
+            const now = Date.now();
+            showCustomPrompt('REMOVE ALL DEAD USERS (>7 DAYS) FROM FIREBASE? THIS CANNOT BE UNDONE.', [
+                { label: 'REMOVE ALL DEAD', color: '#ff3333', action: () => {
+                    const usersRef = window.firebaseRef(window.db, 'wastelanders/');
+                    window.firebaseGet(usersRef).then(snap => {
+                        const data = snap.val() || {};
+                        const deadUids = Object.keys(data).filter(uid => {
+                            const u = data[uid];
+                            return !u.timestamp || (now - u.timestamp) > staleThreshold;
+                        });
+                        if (!deadUids.length) {
+                            showNotification('No dead users found');
+                            return;
+                        }
+                        let removed = 0;
+                        const removeNext = () => {
+                            if (removed >= deadUids.length) {
+                                showNotification(removed + ' dead users removed from Firebase');
+                                loadOverseerUsers(); // refresh the list
+                                return;
+                            }
+                            const uid = deadUids[removed];
+                            window.firebaseRemove(window.firebaseRef(window.db, 'wastelanders/' + uid)).then(() => {
+                                removed++;
+                                removeNext();
+                            }).catch(() => {
+                                removed++;
+                                removeNext();
+                            });
+                        };
+                        removeNext();
+                    }).catch(err => {
+                        showNotification('Error loading users: ' + String(err));
+                    });
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
         }
 
         // ================= SHARED VITALS BAR (v0.52) =================
@@ -4866,24 +5033,70 @@
                 return;
             }
             el.innerHTML = '';
+            // v0.63: add bulk remove stale button if any contacts are stale (>7 days)
+            const staleThreshold = 7 * 24 * 60 * 60 * 1000; // 7 days in ms
+            const now = Date.now();
+            const staleCount = rolodex.filter(c => {
+                const b2 = lastKnownBeaconData[c.uid];
+                return !b2 || !b2.timestamp || (now - b2.timestamp) > staleThreshold;
+            }).length;
+            if (staleCount > 0) {
+                const btn = document.createElement('button');
+                btn.className = 'pip-btn';
+                btn.style.cssText = 'border-color: #ff3333; color: #ff3333; margin-bottom: 15px;';
+                btn.innerText = '[REMOVE ' + staleCount + ' STALE CONTACT' + (staleCount > 1 ? 'S' : '') + ']';
+                btn.onclick = () => removeStaleWastelanders(staleThreshold);
+                el.appendChild(btn);
+            }
             [...rolodex].sort((a, b) => (a.name || '').localeCompare(b.name || '')).forEach(c => {
                 const b2 = lastKnownBeaconData[c.uid];
                 let presence = 'SIGNAL UNKNOWN';
+                let isStale = false;
                 if (b2 && b2.timestamp) {
-                    const m = Math.floor((Date.now() - b2.timestamp) / 60000);
-                    presence = m < 5 ? 'LIVE SIGNAL' : ('LKL ' + m + 'M AGO');
+                    const m = Math.floor((now - b2.timestamp) / 60000);
+                    const isStaleCheck = (now - b2.timestamp) > staleThreshold;
+                    if (isStaleCheck) {
+                        presence = 'STALE SIGNAL (' + Math.floor(m / 60 / 24) + 'D AGO)';
+                        isStale = true;
+                    } else {
+                        presence = m < 5 ? 'LIVE SIGNAL' : ('LKL ' + m + 'M AGO');
+                    }
                     // v0.51 LINK TELEMETRY: contacts broadcast hp/rads with their fix; the
                     // roster line carries them with the signal's own staleness tag.
                     if (typeof b2.hp === 'number' && typeof b2.rads === 'number') {
                         presence += ' | HP ' + b2.hp + ' | ' + b2.rads + ' RADS' + (m < 5 ? '' : ' (AT LAST SEEN)');
                     }
+                } else {
+                    isStale = true;
                 }
                 const row = document.createElement('div');
                 row.className = 'item-row';
-                row.innerHTML = '<div class="item-info"><div>' + escapeHtml(c.name) + '</div><div class="item-effects">' + presence + '</div></div><button class="theme-btn" style="border-color: #ff3333; color: #ff3333;" onclick="event.stopPropagation(); forgetWastelander(\'' + safeUid(c.uid) + '\')">[FORGET]</button>';
+                row.style.opacity = isStale ? '0.6' : '1';
+                row.innerHTML = '<div class="item-info"><div>' + escapeHtml(c.name) + (isStale ? ' <span style="color:#ff3333;">[STALE]</span>' : '') + '</div><div class="item-effects">' + presence + '</div></div><button class="theme-btn" style="border-color: #ff3333; color: #ff3333;" onclick="event.stopPropagation(); forgetWastelander(\'' + safeUid(c.uid) + '\')">[FORGET]</button>';
                 row.onclick = () => openContactSheet(c.uid);
                 el.appendChild(row);
             });
+        }
+
+        // v0.63: bulk remove stale wastelanders (>7 days not seen)
+        function removeStaleWastelanders(threshold) {
+            const now = Date.now();
+            const stale = rolodex.filter(c => {
+                const b2 = lastKnownBeaconData[c.uid];
+                return !b2 || !b2.timestamp || (now - b2.timestamp) > threshold;
+            });
+            showCustomPrompt('REMOVE ' + stale.length + ' STALE CONTACT' + (stale.length > 1 ? 'S' : '') + '? THESE WASTELANDERS HAVE NOT BEEN SEEN IN 7+ DAYS.', [
+                { label: 'REMOVE ALL STALE', color: '#ff3333', action: () => {
+                    stale.forEach(c => {
+                        const idx = rolodex.findIndex(r => r.uid === c.uid);
+                        if (idx !== -1) rolodex.splice(idx, 1);
+                    });
+                    saveToStorage();
+                    renderWastelanders();
+                    showNotification(stale.length + ' STALE CONTACT' + (stale.length > 1 ? 'S' : '') + ' REMOVED.');
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
         }
 
         function openContactSheet(uid) {
@@ -6406,19 +6619,30 @@
             if (!btn) return;
             // Meaningless once installed (WebAPK standalone/fullscreen, or iOS home screen)
             if (getDisplayMode() !== 'browser') { btn.style.display = 'none'; return; }
+            // v0.63: hide if user chose "USE IN BROWSER"
+            if (localStorage.getItem('pipboy-install-dismissed') === 'true') { btn.style.display = 'none'; return; }
             btn.style.display = '';
         }
         async function installApp() {
             if (deferredInstallPrompt) {
-                try {
-                    deferredInstallPrompt.prompt();
-                    const choice = await deferredInstallPrompt.userChoice.catch(() => null);
-                    if (choice && choice.outcome === 'accepted') {
-                        showNotification('INSTALL ACCEPTED. THE APP ICON CAN TAKE UP TO A MINUTE TO APPEAR ON YOUR HOME SCREEN — THAT WAIT IS NORMAL.');
-                    }
-                } catch (e) {}
-                deferredInstallPrompt = null;
-                updateInstallBtn();
+                // v0.63: custom prompt before native install dialog
+                showCustomPrompt('INSTALL POX-BOY 3026 AS STANDALONE APP?', [
+                    { label: 'INSTALL APP', action: async () => {
+                        try {
+                            deferredInstallPrompt.prompt();
+                            const choice = await deferredInstallPrompt.userChoice.catch(() => null);
+                            if (choice && choice.outcome === 'accepted') {
+                                showNotification('INSTALL ACCEPTED. THE APP ICON CAN TAKE UP TO A MINUTE TO APPEAR ON YOUR HOME SCREEN — THAT WAIT IS NORMAL.');
+                            }
+                        } catch (e) {}
+                        deferredInstallPrompt = null;
+                        updateInstallBtn();
+                    }},
+                    { label: 'USE IN BROWSER', color: 'var(--pip-color-dim)', action: () => {
+                        localStorage.setItem('pipboy-install-dismissed', 'true');
+                        updateInstallBtn();
+                    }}
+                ]);
                 return;
             }
             // No capturable prompt available: hand-hold through the manual route

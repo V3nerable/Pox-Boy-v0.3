@@ -85,12 +85,15 @@
         .nav-tabs {
             display: flex;
             justify-content: space-around;
+            align-items: center;
             padding: 10px 0;
             border-bottom: 2px solid var(--pip-color-dim);
             position: relative;
             z-index: 10;
             flex-wrap: nowrap;
             overflow-x: auto;
+            height: 50px;
+            flex-shrink: 0;
         }
         .nav-item { font-size: 1.4rem; cursor: pointer; text-shadow: 0 0 5px var(--pip-color); opacity: 0.5; transition: opacity 0.2s; padding: 0 10px; white-space: nowrap; flex-shrink: 0; }
         .nav-item.active { opacity: 1; border-bottom: 3px solid var(--pip-color); }
