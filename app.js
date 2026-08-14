@@ -1696,8 +1696,10 @@
             const btnContainer = document.getElementById('cp-buttons');
             // v0.38: long button lists (e.g. mail recipient picker with a big rolodex)
             // used to spill off-screen -- cap and scroll the stack instead
-            btnContainer.style.maxHeight = '50vh';
+            btnContainer.style.maxHeight = '65vh';
             btnContainer.style.overflowY = 'auto';
+            btnContainer.style.webkitOverflowScrolling = 'touch';
+            btnContainer.style.touchAction = 'pan-y';
             btnContainer.innerHTML = '';
             
             buttons.forEach(b => {
@@ -1716,11 +1718,13 @@
             });
             
             document.getElementById('custom-prompt-modal').style.display = 'flex';
-            // v0.59: scroll overlay + content to top so tall button lists show first items
+            // v0.59: ensure scroll works on mobile — reset all scroll positions
             const overlay = document.getElementById('custom-prompt-modal');
-            if (overlay) overlay.scrollTop = 0;
-            const mc = document.querySelector('#custom-prompt-modal .modal-content');
-            if (mc) mc.scrollTop = 0;
+            if (overlay) { overlay.scrollTop = 0; overlay.style.webkitOverflowScrolling = 'touch'; }
+            const mc = overlay ? overlay.querySelector('.modal-content') : null;
+            if (mc) { mc.scrollTop = 0; mc.style.webkitOverflowScrolling = 'touch'; }
+            const bc = document.getElementById('cp-buttons');
+            if (bc) { bc.scrollTop = 0; bc.style.webkitOverflowScrolling = 'touch'; bc.style.touchAction = 'pan-y'; }
         }
 
         function renderQuests() {

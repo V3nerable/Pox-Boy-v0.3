@@ -198,7 +198,10 @@
         .modal-content { border: 2px solid var(--pip-color); background: var(--pip-bg); padding: 20px; width: 100%; max-width: 400px; box-shadow: 0 0 15px var(--pip-color-dim); max-height: 90vh; overflow-y: auto; }
         .modal-content h3 { border-bottom: 1px solid var(--pip-color); padding-bottom: 5px; margin-bottom: 15px; }
         /* v0.59: custom prompt modal — align from top so tall button lists don't push first items off-screen */
-        #custom-prompt-modal { align-items: flex-start; padding-top: 40px; overflow-y: auto; }
+        #custom-prompt-modal { align-items: flex-start; padding-top: 40px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+        /* v0.59: fix touch scrolling on mobile — user-select:none on * blocks native scroll */
+        #custom-prompt-modal .modal-content { -webkit-overflow-scrolling: touch; touch-action: pan-y; overflow-y: auto; max-height: 85vh; overscroll-behavior: contain; }
+        #custom-prompt-modal #cp-buttons { -webkit-overflow-scrolling: touch; touch-action: pan-y; overscroll-behavior: contain; }
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; margin-bottom: 5px; }
         .pip-input { width: 100%; background: transparent; border: 1px solid var(--pip-color); color: var(--pip-color); font-family: 'VT323', monospace; font-size: 1.2rem; padding: 8px; outline: none; }

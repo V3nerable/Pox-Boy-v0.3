@@ -55,7 +55,7 @@
             <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 6px;">
                 <div style="display: flex; align-items: baseline; gap: 8px; min-width: 0;">
                     <span class="header-title" id="main-os-title">POX-BOY 3026</span>
-                    <span style="font-size: 0.8rem; opacity: 0.5; flex-shrink: 0;">v0.59</span>
+                    <span style="font-size: 0.8rem; opacity: 0.5; flex-shrink: 0;">v0.60</span>
                 </div>
                 <div id="hud-strip" style="display: flex; gap: 6px; align-items: center; flex-shrink: 0; white-space: nowrap;">
                     <span id="pip-batt" style="font-size: 0.85rem; opacity: 0.8; display: none;"></span>
@@ -103,7 +103,7 @@
                         <div id="vb-fx" style="position:absolute; inset:0; pointer-events:none;"></div>
                     </div>
                     <span id="vb-default" style="opacity:0.6; text-align:center;">[ VAULT BOY GRAPHIC HERE ]<br><span style="font-size:0.9rem;">TAP TO SET FROM DATABANK</span></span>
-                    <!-- v0.59: Starched Genes DNA strand lock indicator -->
+                    <!-- v0.60: Starched Genes DNA strand lock indicator -->
                     <span id="vb-starched" style="display:none; position:absolute; top:4px; right:4px; font-size:1.2rem; color:#ffb642; text-shadow:0 0 6px #ffb642;" title="STARCHED GENES ACTIVE">🧬🔒</span>
                 </div>
                 <p id="stat-name-display" style="text-align: center; font-size: 1.4rem; font-weight: bold; margin-bottom: 5px;">NAME: UNKNOWN</p>
@@ -125,10 +125,10 @@
                     <div style="font-weight: bold;" id="status-ap-val">100 / 100</div>
                 </div>
                 
-                <!-- v0.59: RADIATION LEVEL row removed — already shown in HP/RADS bar + footer -->
+                <!-- v0.60: RADIATION LEVEL row removed — already shown in HP/RADS bar + footer -->
             </div>
 
-            <!-- SPECIAL (v0.59: merged with SKILLS + PERKS — one scrollable page) -->
+            <!-- SPECIAL (v0.60: merged with SKILLS + PERKS — one scrollable page) -->
             <div id="sub-stat-special" class="sub-tab-content">
                 <h2>ATTRIBUTES</h2><br>
                 <div class="special-list" id="special-list-display">
@@ -142,7 +142,7 @@
                 <div id="perks-list-display">
                     <!-- Populated by JS -->
                 </div>
-                <!-- v0.59: MUTATIONS — active mutations list (below perks, inside SPECIAL scroll) -->
+                <!-- v0.60: MUTATIONS — active mutations list (below perks, inside SPECIAL scroll) -->
                 <div id="mutations-section" style="margin-top: 25px; display: none;">
                     <h2 style="color: #ff9a3c; text-shadow: 0 0 6px #ff9a3c;">☢ MUTATIONS</h2><br>
                     <div id="mutations-list-display">
@@ -151,7 +151,7 @@
                 </div>
             </div>
 
-            <!-- SKILLS and PERKS removed as standalone tabs (v0.59: merged into SPECIAL above) -->
+            <!-- SKILLS and PERKS removed as standalone tabs (v0.60: merged into SPECIAL above) -->
 
             <!-- STATS (v0.53: relocated from DATA; hosts OVERSEER pariah/zone panels) -->
             <div id="sub-stat-stats" class="sub-tab-content">
@@ -174,19 +174,19 @@
                     <p>ENCLAVE MARCHES ENDURED: <span id="fs-marches">0</span></p>
                     <p>PHOTOGRAPHS REGRETTED: <span id="fs-regret">0</span></p>
                 </div>
-                <!-- v0.59: STARCHED GENES player unlock button (shown when Overseer enables globally) -->
+                <!-- v0.60: STARCHED GENES player unlock button (shown when Overseer enables globally) -->
                 <div id="starched-unlock-section" style="display:none; margin-top:20px; border-top:1px dashed var(--pip-color-dim); padding-top:15px;">
                     <button class="pip-btn" id="starched-unlock-btn" onclick="unlockStarchedGenes()" style="border-color:#ffb642; color:#ffb642; border-style:dashed;">[🧬 UNLOCK STARCHED GENES]</button>
                     <p style="font-size:0.85rem; opacity:0.7; margin-top:8px; line-height:1.4;">LOCK YOUR MUTATIONS IN PLACE. DECONTAMINATION STATIONS CANNOT STRIP THEM. ONE-TIME UNLOCK — PERMANENT.</p>
                 </div>
             </div>
 
-            <!-- v0.59: OVERSEER tab — all Overseer controls except radio (dev-mode only) -->
+            <!-- v0.60: OVERSEER tab — all Overseer controls except radio (dev-mode only) -->
             <div id="sub-stat-overseer" class="sub-tab-content">
                 <div id="overseer-pariahs" style="display:none;"></div>
             </div>
 
-            <!-- OPTIONS (v0.59: moved from DATA to STAT) -->
+            <!-- OPTIONS (v0.60: moved from DATA to STAT) -->
             <div id="sub-stat-options" class="sub-tab-content">
                 <h2>APP OPTIONS</h2><br>
                 <button class="pip-btn" id="options-fs-btn" onclick="toggleFullscreen()" style="border-style: dashed;">[FULLSCREEN]</button>
@@ -227,7 +227,7 @@
                 <div class="sub-nav-item" onclick="switchSubTab('data', 'factions')">FACTIONS</div>
             </div>
 
-            <!-- APP OPTIONS moved to STAT > OPTIONS (v0.59) -->
+            <!-- APP OPTIONS moved to STAT > OPTIONS (v0.60) -->
 
             <!-- CONTRACTS (v0.44): quests YOU issued, with live recipient statuses -->
             <div id="sub-data-contracts" class="sub-tab-content">
@@ -273,7 +273,7 @@
                     <div id="map-container"></div>
                     <!-- v0.56: live signal census -- the empty-map question now has a number -->
                     <div id="map-signals" style="position: absolute; top: 6px; left: 6px; z-index: 800; font-size: 0.75rem; padding: 2px 8px; border: 1px dashed var(--pip-color-dim); background: rgba(5,16,5,0.85); opacity: 0.9;">SIGNALS: --</div>
-                    <!-- v0.59: map camera overlay buttons — compact glyphs in the corner -->
+                    <!-- v0.60: map camera overlay buttons — compact glyphs in the corner -->
                     <div id="map-cam-overlay" style="position: absolute; bottom: 8px; right: 8px; z-index: 800; display: flex; gap: 4px;">
                         <button class="map-overlay-btn" onclick="mapGoMe()" title="Center on me">◎</button>
                         <button class="map-overlay-btn" onclick="mapFitAll()" title="Fit all">⛶</button>
@@ -418,8 +418,8 @@
                 <button class="theme-btn" onclick="openFactionAuth('ADD')">+ ADD FACTION</button>
                 <button class="theme-btn" onclick="openFactionAuth('EDIT')" style="border-style: dashed;">EDIT FACTION</button>
             </div>
-            <!-- v0.59: map add/remove marker buttons removed from footer (use long-press map or split-controls sidebar) -->
-            <!-- v0.59: map camera controls moved to overlay on the map itself -->
+            <!-- v0.60: map add/remove marker buttons removed from footer (use long-press map or split-controls sidebar) -->
+            <!-- v0.60: map camera controls moved to overlay on the map itself -->
             <div id="dev-controls" style="display: none; justify-content: center; gap: 10px;">
                 <button class="theme-btn" onclick="triggerDevReset()" style="border-color: #ff3333; color: #ff3333;">FACTORY RESET</button>
                 <button class="theme-btn" onclick="toggleDevMode()" style="border-color: #42b6ff; color: #42b6ff;">TOGGLE OVERSEER</button>
@@ -498,7 +498,7 @@
         </div>
     </div>
 
-    <!-- v0.59: quickcam removed (SNAP NOW never worked reliably; too many permission/modal conflicts) -->
+    <!-- v0.60: quickcam removed (SNAP NOW never worked reliably; too many permission/modal conflicts) -->
 
     <!-- COMPOSE ITEM MODAL -->
     <div id="compose-item-modal" class="modal-overlay" style="z-index: 125;">
@@ -871,7 +871,7 @@
     <div id="pre-boot-overlay" class="modal-overlay" style="z-index: 250; background: var(--pip-bg); flex-direction: column; display: none;">
         <!-- Version Tag & Dev Skip Button -->
         <div style="position: absolute; top: 10px; right: 10px; z-index: 260; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-            <span style="font-size: 0.8rem; opacity: 0.5;">v0.59</span>
+            <span style="font-size: 0.8rem; opacity: 0.5;">v0.60</span>
             <button class="pip-btn" onclick="devSkipToApp()" style="font-size: 0.7rem; padding: 2px 5px; border: none; color: #ff3333; opacity: 0.5;">[DEV: FAST BOOT]</button>
         </div>
         
@@ -893,7 +893,7 @@
 
     <!-- BOOT SPLASH SCREEN -->
     <div id="boot-splash" class="modal-overlay" style="z-index: 200; background: var(--pip-bg); flex-direction: column; display: flex;">
-        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.59</span>
+        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.60</span>
         <div class="crt" style="position: absolute; top:0; left:0; right:0; bottom:0; pointer-events: none; z-index: 201;"></div>
         <div style="z-index: 202; width: 100%; max-width: 600px; padding: 20px; text-align: left; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; justify-content: flex-end;" id="boot-text-container">
             <p id="boot-log-1" style="margin-bottom: 5px; display: none; font-size: 1rem;">ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM</p>
