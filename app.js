@@ -1439,11 +1439,45 @@
         })();
 
         // Custom in-app confirmation replacement
-        function showCustomPrompt(text, buttons) {
+        let cpStepVal = 0; // v0.57: pending number while a stepper prompt is open
+        function showCustomPrompt(text, buttons, stepper) {
             // v0.45: the shared prompt can carry an image (mail photo viewer) — reset it
             // on every open so an old photo never bleeds into an unrelated query
             const cpImg = document.getElementById('cp-img');
             if (cpImg) { cpImg.style.display = 'none'; cpImg.removeAttribute('src'); }
+            // v0.57 (user: "Hot/med zone set any radius"): optional tap-stepper row -- dials
+            // a number with theme buttons, NO native keyboard (same convention as the
+            // faction-auth amount). Stepper presses never close the prompt; only real
+            // buttons do. Generic on purpose (bounty payouts etc. later).
+            const cpStep = document.getElementById('cp-stepper');
+            if (cpStep) {
+                cpStep.innerHTML = '';
+                if (stepper) {
+                    cpStepVal = stepper.value;
+                    const mkStep = function(delta) {
+                        const sb = document.createElement('button');
+                        sb.className = 'theme-btn';
+                        sb.style.cssText = 'font-size: 0.95rem; padding: 6px 9px; min-width: 50px;';
+                        sb.innerText = (delta > 0 ? '+' : '−') + Math.abs(delta);
+                        sb.onclick = function() {
+                            cpStepVal = Math.min(stepper.max, Math.max(stepper.min, cpStepVal + delta));
+                            const n = document.getElementById('cp-step-n'); if (n) n.innerText = cpStepVal + 'M';
+                            const d = document.getElementById('cp-deploy-btn'); if (d) d.innerText = 'DEPLOY ' + cpStepVal + 'M FENCE';
+                        };
+                        return sb;
+                    };
+                    const readout = document.createElement('span');
+                    readout.id = 'cp-step-n';
+                    readout.style.cssText = 'font-size: 1.3rem; font-weight: bold; min-width: 70px; text-align: center; text-shadow: 0 0 8px currentColor;';
+                    readout.innerText = cpStepVal + 'M';
+                    cpStep.appendChild(mkStep(-25)); cpStep.appendChild(mkStep(-5)); cpStep.appendChild(mkStep(-1));
+                    cpStep.appendChild(readout);
+                    cpStep.appendChild(mkStep(1)); cpStep.appendChild(mkStep(5)); cpStep.appendChild(mkStep(25));
+                    cpStep.style.display = 'flex';
+                } else {
+                    cpStep.style.display = 'none';
+                }
+            }
             document.getElementById('cp-text').innerText = text;
             const btnContainer = document.getElementById('cp-buttons');
             // v0.38: long button lists (e.g. mail recipient picker with a big rolodex)
@@ -1455,6 +1489,7 @@
             buttons.forEach(b => {
                 const btnEl = document.createElement('button');
                 btnEl.className = 'pip-btn';
+                if (b.id) btnEl.id = b.id; // v0.57: lets a stepper rewrite a button label live
                 btnEl.innerText = b.label;
                 if (b.color) {
                     btnEl.style.borderColor = b.color;
@@ -4085,13 +4120,19 @@
                 label: kind === 'med' ? 'MED ZONE' : 'HOT ZONE',
                 kind: kind, lat: lat, lng: lng, radius: r, ts: Date.now()
             };
+            // v0.57 (user: "dont need ack after deployment"): success stays SILENT -- the
+            // fence drawing on every unit's map is the receipt. Only failures speak.
             window.firebaseSet(window.firebaseRef(window.db, 'radzones/' + key), zone)
-                .then(() => showNotification((kind === 'med' ? 'MED' : 'HOT') + ' ZONE DEPLOYED (' + r + 'M FENCE).'))
                 .catch(() => showNotification('DEPLOY FAILED -- CHECK SIGNAL OR RULES.'));
         }
 
         // v0.55: themed radius picker — replaces the old fixed-15m confirm dialog.
         function promptZoneRadius(kind, where) {
+            // v0.57 (user: "after deploying hot/med zone the add marker UI stays up"): the
+            // placement modal sat UNDER the radius picker and popped back after deploy --
+            // close it the moment a zone button is tapped. No-op on the drop-at-boots path.
+            const awm = document.getElementById('add-waypoint-modal');
+            if (awm) awm.style.display = 'none';
             if (where === 'me' && (myLastLat === null || myLastLng === null)) { showNotification('NO POSITION FIX -- ENABLE GPS TRACKING FROM THE MAP TAB.'); return; }
             const lat = where === 'map' ? tempWpLat : myLastLat;
             const lng = where === 'map' ? tempWpLng : myLastLng;
@@ -4100,8 +4141,22 @@
             const mk = r => ({ label: r + 'M FENCE', color: tint, action: () => dropZone(kind, lat, lng, r) });
             showCustomPrompt((med ? 'SANCTIFY' : 'IRRADIATE') + ' THIS SPOT? ' + (med ? 'A ✚ MED ZONE' : 'A ☢ HOT ZONE') + ' DEPLOYS FOR ALL UNITS UNTIL EXTINGUISHED. PICK THE FENCE RADIUS:', [
                 mk(10), mk(15), mk(25), mk(50), mk(100),
+                { label: 'SET RANGE...', color: tint, action: () => promptZoneStepper(kind, where, lat, lng) },
                 { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
             ]);
+        }
+
+        // v0.57 (user: "Hot/med zone set any radius"): tap-to-dial ANY fence from 5 to 200
+        // metres (the rules validator has allowed that range since v0.50) -- no chips limit,
+        // no native keyboard. DEPLOY button label tracks the dialled number live.
+        function promptZoneStepper(kind, where, lat, lng) {
+            const med = kind === 'med';
+            const tint = med ? '#5fc98e' : '#ff3333';
+            showCustomPrompt('DIAL THE FENCE RADIUS -- ' + (med ? '✚ MED ZONE' : '☢ HOT ZONE') + ' -- 5 TO 200 METRES:', [
+                { id: 'cp-deploy-btn', label: 'DEPLOY 15M FENCE', color: tint, action: () => dropZone(kind, lat, lng, cpStepVal) },
+                { label: 'BACK TO QUICK SIZES', color: 'var(--pip-color-dim)', action: () => promptZoneRadius(kind, where) },
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ], { value: 15, min: 5, max: 200 });
         }
 
         function dropHotZone(where) { promptZoneRadius('hot', where); } // v0.55: sized drops

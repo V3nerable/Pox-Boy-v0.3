@@ -54,11 +54,15 @@
         <div style="display: flex; flex-direction: column;">
             <div style="display: flex; align-items: baseline; gap: 10px;">
                 <span class="header-title" id="main-os-title">POX-BOY 3026</span>
-                <span style="font-size: 0.8rem; opacity: 0.5;">v0.56</span>
+                <span style="font-size: 0.8rem; opacity: 0.5;">v0.57</span>
             </div>
-            <span id="pip-clock" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px;"></span>
-            <span id="hud-radio" style="font-size: 0.95rem; margin-top: 2px; margin-right: 7px; display: none; text-shadow: 0 0 5px currentColor;">♪</span><span id="hud-sat" style="font-size: 0.95rem; margin-top: 2px; margin-right: 7px; opacity: 0.3; color: var(--pip-color-dim); text-shadow: 0 0 5px currentColor;">⌖</span>
-            <span id="pip-batt" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px; display: none;"></span>
+            <!-- v0.57 (user: header was growing a line per glyph): clock + radio/sat glyphs + batt ride ONE horizontal strip, mobile-signal style -- the header never grows taller -->
+            <div style="display: flex; align-items: baseline; gap: 8px; margin-top: 2px; flex-wrap: nowrap;">
+                <span id="pip-clock" style="font-size: 0.9rem; opacity: 0.8;"></span>
+                <span id="hud-radio" style="font-size: 0.95rem; display: none; text-shadow: 0 0 5px currentColor;">♪</span>
+                <span id="hud-sat" style="font-size: 0.95rem; opacity: 0.3; color: var(--pip-color-dim); text-shadow: 0 0 5px currentColor;">⌖</span>
+                <span id="pip-batt" style="font-size: 0.9rem; opacity: 0.8; display: none;"></span>
+            </div>
         </div>
         <div class="header-controls">
         </div>
@@ -692,6 +696,8 @@
             <img id="cp-img" alt="" style="display:none; max-width:100%; max-height:35vh; object-fit:contain; margin:0 auto 10px; border:1px solid var(--pip-color);">
             <!-- v0.45: long messages scroll inside the box (pre-line honors \n) so buttons never get pushed off-screen -->
             <p id="cp-text" style="margin: 25px 0; font-size: 1.4rem; font-weight: bold; white-space: pre-line; max-height: 40vh; overflow-y: auto;"></p>
+            <!-- v0.57: optional tap-stepper row (zone SET RANGE, later bounty payouts) -- populated/shown by showCustomPrompt only when a prompt passes a stepper config -->
+            <div id="cp-stepper" style="display: none; margin: -10px 0 18px; justify-content: center; align-items: center; gap: 6px; flex-wrap: wrap;"></div>
             <div id="cp-buttons" style="display: flex; gap: 10px; justify-content: center; flex-direction: column;">
                 <!-- Buttons injected by JS -->
             </div>
@@ -733,8 +739,8 @@
 
             <!-- v0.50: OVERSEER zone placement — same long-press flow, true 15m fences drawn on every unit -->
             <div id="wp-overseer-zones" style="display:none; margin-bottom:12px;">
-                <button class="pip-btn" onclick="dropHotZone('map')" style="border-color:#ff3333; color:#ff3333; margin-bottom:8px;">[☢ HOT ZONE HERE (15M)]</button>
-                <button class="pip-btn" onclick="dropMedZone('map')" style="border-color:#5fc98e; color:#5fc98e;">[✚ MED ZONE HERE (15M)]</button>
+                <button class="pip-btn" onclick="dropHotZone('map')" style="border-color:#ff3333; color:#ff3333; margin-bottom:8px;">[☢ HOT ZONE HERE]</button>
+                <button class="pip-btn" onclick="dropMedZone('map')" style="border-color:#5fc98e; color:#5fc98e;">[✚ MED ZONE HERE]</button>
             </div>
 
             <button class="pip-btn" onclick="saveNewWaypoint()">SAVE MARKER</button>
@@ -861,7 +867,7 @@
     <div id="pre-boot-overlay" class="modal-overlay" style="z-index: 250; background: var(--pip-bg); flex-direction: column; display: none;">
         <!-- Version Tag & Dev Skip Button -->
         <div style="position: absolute; top: 10px; right: 10px; z-index: 260; display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
-            <span style="font-size: 0.8rem; opacity: 0.5;">v0.56</span>
+            <span style="font-size: 0.8rem; opacity: 0.5;">v0.57</span>
             <button class="pip-btn" onclick="devSkipToApp()" style="font-size: 0.7rem; padding: 2px 5px; border: none; color: #ff3333; opacity: 0.5;">[DEV: FAST BOOT]</button>
         </div>
         
@@ -883,7 +889,7 @@
 
     <!-- BOOT SPLASH SCREEN -->
     <div id="boot-splash" class="modal-overlay" style="z-index: 200; background: var(--pip-bg); flex-direction: column; display: flex;">
-        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.56</span>
+        <span style="position: absolute; top: 10px; right: 10px; font-size: 0.8rem; opacity: 0.5; z-index: 203;">v0.57</span>
         <div class="crt" style="position: absolute; top:0; left:0; right:0; bottom:0; pointer-events: none; z-index: 201;"></div>
         <div style="z-index: 202; width: 100%; max-width: 600px; padding: 20px; text-align: left; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; justify-content: flex-end;" id="boot-text-container">
             <p id="boot-log-1" style="margin-bottom: 5px; display: none; font-size: 1rem;">ROBCO INDUSTRIES UNIFIED OPERATING SYSTEM</p>
