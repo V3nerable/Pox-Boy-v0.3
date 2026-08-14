@@ -133,11 +133,27 @@
             { id: 4, name: "VAULT-TEC SURVIVORS", rep: 0, leader: "The Overseer", blurb: "Tunnel-dwellers who recently surfaced with high-tech gear.", bio: "Emerged from the deep underground bunkers. They have pristine jumpsuits and zero understanding of how the wasteland actually works.", members: ["Vault Boy", "Gary 1", "Gary 2"] }
         ];
 
-        let waypoints = JSON.parse(localStorage.getItem('pipboy-waypoints')) || [
-            // Example Pre-loaded Waypoints
+        // v0.59: DEFAULT WAYPOINTS with version-based merge for existing users
+        const DEFAULT_WAYPOINTS = [
             { id: 101, name: "VIP LOUNGE", lat: -31.9505, lng: 115.8605, discovered: false },
             { id: 102, name: "NUKA-COLA BAR", lat: -31.9515, lng: 115.8615, discovered: false }
         ];
+        const WAYPOINT_VERSION = 1; // bump this when adding new default waypoints
+
+        let waypoints = JSON.parse(localStorage.getItem('pipboy-waypoints')) || DEFAULT_WAYPOINTS;
+
+        // Merge new default waypoints for existing users who already have a waypoint list
+        (function mergeWaypoints() {
+            const savedVer = parseInt(localStorage.getItem('pipboy-wp-version') || '0', 10);
+            if (savedVer < WAYPOINT_VERSION && localStorage.getItem('pipboy-waypoints')) {
+                const existingNames = new Set(waypoints.map(w => w.name));
+                DEFAULT_WAYPOINTS.forEach(dw => {
+                    if (!existingNames.has(dw.name)) waypoints.push({...dw, id: Date.now() + Math.floor(Math.random() * 10000)});
+                });
+                localStorage.setItem('pipboy-waypoints', JSON.stringify(waypoints));
+            }
+            localStorage.setItem('pipboy-wp-version', String(WAYPOINT_VERSION));
+        })();
 
         let activeItemId = null;
         let currentInvTab = 'weapons';
@@ -1700,9 +1716,11 @@
             });
             
             document.getElementById('custom-prompt-modal').style.display = 'flex';
-            // v0.58: scroll modal content to top so long lists show the first items
-            const modalContent = document.querySelector('#custom-prompt-modal .modal-content');
-            if (modalContent) modalContent.scrollTop = 0;
+            // v0.59: scroll overlay + content to top so tall button lists show first items
+            const overlay = document.getElementById('custom-prompt-modal');
+            if (overlay) overlay.scrollTop = 0;
+            const mc = document.querySelector('#custom-prompt-modal .modal-content');
+            if (mc) mc.scrollTop = 0;
         }
 
         function renderQuests() {
