@@ -146,6 +146,11 @@
             const st = document.getElementById('tab-stat');
             return !!(st && st.classList.contains('active') && currentStatTab === 'stats');
         }
+        // v0.58: overseer tab active check (pariah/zone listeners re-render into this tab)
+        function overseerPaneActive() {
+            const st = document.getElementById('tab-stat');
+            return !!(st && st.classList.contains('active') && currentStatTab === 'overseer');
+        }
         let currentDataTab = 'quests';
 
         const themes = [
@@ -236,9 +241,7 @@
             // Wild / cumulative stats
             if (el('fs-rads-total')) el('fs-rads-total').innerText = funStats.radsTotal;
             if (el('fs-distance')) el('fs-distance').innerText = (funStats.distance / 1000).toFixed(1) + ' KM';
-            if (el('fs-geiger')) el('fs-geiger').innerText = funStats.geiger;
             if (el('fs-peanuts')) el('fs-peanuts').innerText = funStats.peanuts;
-            if (el('fs-rats')) el('fs-rats').innerText = funStats.rats;
             if (el('fs-neardth')) el('fs-neardth').innerText = funStats.nearDeath;
             if (el('fs-marches')) el('fs-marches').innerText = funStats.marches;
             if (el('fs-regret')) el('fs-regret').innerText = funStats.regret;
@@ -319,8 +322,15 @@
             return true;
         }
         // Mutation roll — called from radDamageTick when rads >= 250
+        // v0.58: 10-minute cooldown between gains (multi-day event pacing)
+        let _lastMutationGain = 0;
         function rollMutation() {
-            if (Math.random() < 0.10) gainMutation();
+            const now = Date.now();
+            if (now - _lastMutationGain < 10 * 60 * 1000) return; // 10 min cooldown
+            if (Math.random() < 0.10) {
+                gainMutation();
+                _lastMutationGain = now;
+            }
         }
 
         // v0.58: render active mutations list in the SPECIAL sub-tab
@@ -408,14 +418,14 @@
         
         let obOriginId = null;
         const obOrigins = [
-            { id: 'vault', name: 'VAULT-TEC DEFECTOR', desc: 'You woke up in a tunnel. Now you drive. [Grants: Vault Suit, Pistol. +1 INT. -1 PER]', stats: { I: 1, P: -1 } },
-            { id: 'warboy', name: 'WAR BOY RUNAWAY', desc: 'Half-life is not enough. You want it all. [Grants: Thunderstick. +1 END. -1 INT]', stats: { E: 1, I: -1 } },
-            { id: 'scavenger', name: 'WASTELAND DRIFTER', desc: 'You survive on scrap and wits. [Grants: Machete, Fuel. +1 LCK. -1 CHA]', stats: { L: 1, C: -1 } }
+            { id: 'vault', name: 'VAULT-TEC DEFECTOR', desc: 'You woke up in a tunnel. Now you drive. [+1 INT. +1 PER. +20 Vault-Tec rep]', stats: { I: 1, P: 1 } },
+            { id: 'warboy', name: 'WAR BOY RUNAWAY', desc: 'Half-life is not enough. You want it all. [+1 STR. +1 END. +20 War Boys rep]', stats: { S: 1, E: 1 } },
+            { id: 'scavenger', name: 'WASTELAND DRIFTER', desc: 'You survive on scrap and wits. [+1 LCK. +1 CHA. +20 Scavengers rep]', stats: { L: 1, C: 1 } }
         ];
 
         let obTraitId = null;
         const obTraits = [
-            { id: 'guzzoline', name: 'GUZZOLINE ADDICT', desc: 'Start with 2 Guzzoline Tickets. Max HP permanently reduced to 80.' },
+            { id: 'guzzoline', name: 'GUZZOLINE ADDICT', desc: 'You run on fumes and spite. Max HP reduced to 80. Radiation accumulates at half rate.' },
             { id: 'kamikaze', name: 'KAMIKAZE', desc: 'Massive melee damage. +2 Strength. -2 Endurance.' },
             { id: 'heavy', name: 'HEAVY HANDED', desc: 'You break things. +20 Melee Skill. +1 Strength. -2 Intelligence.' },
             { id: 'four_eyes', name: 'GOGGLE WEARER', desc: 'You need your goggles. +2 Perception. -1 Charisma.' },
@@ -471,7 +481,7 @@
             { id: 'witness', name: 'WITNESS ME!', desc: 'Ride eternal, shiny and chrome. +10 to combat skills.' },
             { id: 'blackthumb', name: 'BLACKTHUMB MECHANIC', desc: 'You speak to the engines. Master of scrap and repairs.' },
             { id: 'bloodbag', name: 'UNIVERSAL BLOODBAG', desc: 'High octane blood. +10 to Pox Survival and Endurance limits.' },
-            { id: 'ayatollah', name: 'LORD OF THE WASTELAND', desc: 'The Ayatollah of Rock-n-Rolla! Starts with 2 free Guzzoline (Drink) Tickets.' },
+            { id: 'ayatollah', name: 'WASTELAND LEGEND', desc: 'Your name echoes across the wastes. +20 starting reputation with ALL factions.' },
             { id: 'feral', name: 'FERAL BITER', desc: 'Words are hard. Biting is easy. Extra Unarmed damage.' }
         ];
         let selectedPerkId = 'witness';
@@ -837,35 +847,26 @@
             userProfile.perk = perkData;
             userProfile.isInitiated = true;
 
-            // Apply ORIGIN inventory bonuses (Stats are applied in calculateSkills)
+            // v0.59: ORIGIN bonuses — stat modifiers applied in calculateSkills, faction rep here, no items (INV retired)
             if (obOriginId === 'vault') {
-                items.push({ id: Date.now(), name: "10MM PISTOL", type: "weapons", effects: "DMG: 18", quantity: 1, equipped: true });
-                items.push({ id: Date.now()+1, name: "VAULT SUIT", type: "apparel", effects: "DR: 5", quantity: 1, equipped: true });
                 const f = factions.find(fac => fac.name === "VAULT-TEC SURVIVORS");
                 if (f) f.rep += 20;
             } else if (obOriginId === 'warboy') {
-                items.push({ id: Date.now(), name: "THUNDERSTICK", type: "weapons", effects: "DMG: 40 (Explosive)", quantity: 1, equipped: true });
-                items.push({ id: Date.now()+1, name: "CHROME SPRAY", type: "aid", effects: "WITNESS ME", quantity: 1, equipped: false });
                 const f1 = factions.find(fac => fac.name === "THE WAR BOYS");
                 if (f1) f1.rep += 20;
             } else if (obOriginId === 'scavenger') {
-                items.push({ id: Date.now(), name: "RUSTY MACHETE", type: "weapons", effects: "DMG: 12", quantity: 1, equipped: true });
-                items.push({ id: Date.now()+1, name: "JERRY CAN", type: "misc", effects: "Contains Guzzoline", quantity: 1, equipped: false });
                 const f = factions.find(fac => fac.name === "SCAVENGERS GUILD");
                 if (f) f.rep += 20;
             }
 
-            // Apply TRAIT inventory/health bonuses (Stats are applied in calculateSkills)
+            // v0.59: TRAIT bonuses — Guzzoline Addict: HP reduced to 80 + half-rad mechanic (no items)
             if (obTraitId === 'guzzoline') {
-                items.push({ id: Date.now()+2, name: "DRINK TICKET", type: "aid", effects: "Restores Thirst", quantity: 2, equipped: false });
                 userProfile.maxHp = 80;
             }
 
-            // Apply PERK bonuses
+            // v0.59: PERK bonuses — Wasteland Legend: +20 rep to ALL factions (no items)
             if (perkData.id === 'ayatollah') {
-                const dt = items.find(i => i.name === 'DRINK TICKET');
-                if (dt) dt.quantity += 2;
-                else items.push({ id: Date.now()+3, name: "DRINK TICKET", type: "aid", effects: "Restores Thirst", quantity: 2, equipped: false });
+                factions.forEach(f => f.rep += 20);
             }
 
             calculateSkills();
@@ -1074,6 +1075,7 @@
             // v0.58: footer map marker buttons removed (use long-press map or split-controls sidebar)
 
             if (tabId === 'stat' && currentStatTab === 'stats') renderStatsTab(); // v0.53
+            if (tabId === 'stat' && currentStatTab === 'overseer') renderOverseerTab(); // v0.58
             if (tabId === 'mail') { renderMail(); refreshOutboxStatuses(); }      // v0.53: top-level MAIL tab
             if (tabId === 'radio') renderRadioTab();                              // v0.54: overseer desk + LIVE badges on entry
             if (tabId === 'data') {
@@ -1108,13 +1110,14 @@
                 currentInvTab = subTabId; // v0.53: INV tab retired; branch kept inert for stale callers
                 renderInventory(subTabId);
             } else if (parentTab === 'stat') {
-                // v0.57: STAT sub-tabs are now STATUS / SPECIAL (merged skills+perks) / STATS / OPTIONS
+                // v0.58: STAT sub-tabs are now STATUS / SPECIAL / STATS / OVERSEER / OPTIONS
                 currentStatTab = subTabId;
                 document.getElementById('dev-controls').style.display = (subTabId === 'stats') ? 'flex' : 'none';
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
                 const target = document.getElementById(`sub-${parentTab}-${subTabId}`);
                 if (target) target.classList.add('active');
                 if (subTabId === 'stats') renderStatsTab();
+                if (subTabId === 'overseer') renderOverseerTab();
             } else if (parentTab === 'data') {
                 // v0.57: DATA sub-tabs are now QUESTS / CONTRACTS / WASTELANDERS / FACTIONS (OPTIONS moved to STAT)
                 currentDataTab = subTabId;
@@ -1697,6 +1700,9 @@
             });
             
             document.getElementById('custom-prompt-modal').style.display = 'flex';
+            // v0.58: scroll modal content to top so long lists show the first items
+            const modalContent = document.querySelector('#custom-prompt-modal .modal-content');
+            if (modalContent) modalContent.scrollTop = 0;
         }
 
         function renderQuests() {
@@ -3157,6 +3163,19 @@
             if (scramblerOn() && gpsWatchId !== null && myLastLat !== null && myLastLng !== null) pushMyBeacon(myLastLat, myLastLng);
         }
 
+        // v0.58: OVERSEER tab — all Overseer controls except radio (dev-mode only)
+        function renderOverseerTab() {
+            const pariahEl = document.getElementById('overseer-pariahs');
+            if (!pariahEl) return;
+            if (localStorage.getItem('pipboy-dev-mode') !== 'true') {
+                pariahEl.style.display = 'none';
+                pariahEl.innerHTML = '';
+                return;
+            }
+            pariahEl.style.display = 'block';
+            pariahEl.innerHTML = renderPariahPanel();
+        }
+
         // ================= SHARED VITALS BAR (v0.52) =================
         // The "overtaking" bar: green = HP remaining, red = the rads-eaten slice growing
         // in from the right (1000 rads eats the whole bar). Beacon telemetry for linked
@@ -3174,18 +3193,10 @@
             // v0.57: stats-general and stats-wild are now static HTML with span IDs;
             // renderFunStats() updates the values live without destroying the DOM
             renderFunStats();
-            // v0.46: PARIAH WATCH panel renders under dev-mode only; hiding fully when
-            // Overseer mode is off so players never see the control surface
-            const pariahEl = document.getElementById('overseer-pariahs');
-            if (pariahEl) {
-                const isDevMode = localStorage.getItem('pipboy-dev-mode') === 'true';
-                if (!isDevMode) {
-                    pariahEl.style.display = 'none';
-                    pariahEl.innerHTML = '';
-                } else {
-                    pariahEl.style.display = 'block';
-                    pariahEl.innerHTML = renderPariahPanel();
-                }
+            // v0.58: OVERSEER nav item visibility gated by dev mode (panel moved to its own tab)
+            const overseerNav = document.getElementById('overseer-nav-item');
+            if (overseerNav) {
+                overseerNav.style.display = (localStorage.getItem('pipboy-dev-mode') === 'true') ? '' : 'none';
             }
             // v0.35: roster lives on its own WASTELANDERS tab again; stats just reports
             if (currentDataTab === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
@@ -4236,7 +4247,6 @@
         function geigerBurst() {
             geigerClick();
             if (Math.random() < 0.25) setTimeout(geigerClick, 120 + Math.random() * 140);
-            bumpFunStat('geiger', 1); // v0.57: track geiger readings
         }
 
         // v0.48: two clocks. Fields burn FAST (user: "1 every 5 seconds"), recovery stays
@@ -4244,8 +4254,14 @@
         function radDamageTick() {
             evalPariahField(); // cheap re-evaluation: beacons age even between GPS fixes
             if (!radFieldActive) return;
-            adjustRads(1);
-            geigerBurst(); // the counter is the only voice of the field now
+            // v0.59: Guzzoline Addict — radiation accumulates at half rate (50% skip per tick)
+            const guzzolineResist = (userProfile.trait && userProfile.trait.id === 'guzzoline');
+            if (guzzolineResist && Math.random() < 0.5) {
+                geigerBurst(); // still hear the rattle, just don't absorb the dose
+            } else {
+                adjustRads(1);
+                geigerBurst();
+            }
             // v0.58: mutation roll — only when current rads >= 250
             if (userProfile.rads >= 250) rollMutation();
         }
@@ -4263,6 +4279,7 @@
                 pariahMarks = snap.val() || {};
                 evalPariahField(); // a fresh decree can bathe you where you stand
                 if (statsPaneActive()) renderStatsTab(); // v0.53
+                if (overseerPaneActive()) renderOverseerTab(); // v0.58
             }, () => {}); // offline: last known decree list stands
         }
 
@@ -4272,6 +4289,7 @@
                 renderRadZones(snap.val() || {});
                 evalPariahField(); // a dropped zone can bathe you where you stand
                 if (statsPaneActive()) renderStatsTab(); // v0.53
+                if (overseerPaneActive()) renderOverseerTab(); // v0.58
             }, () => {}); // offline: last known zone board stands
         }
 
@@ -6167,7 +6185,7 @@
         function radioWriteEpoch(sid, epoch) {
             if (!window.db) { showNotification('NO SATELLITE LINK.'); return; }
             window.firebaseSet(window.firebaseRef(window.db, 'radio/' + sid), { epoch: epoch })
-                .then(() => { showNotification('BROADCAST UPDATED.'); renderRadioTab(); })
+                .then(() => { renderRadioTab(); })
                 .catch(() => showNotification('BROADCAST WRITE REJECTED -- RADIO NODE MISSING FROM RULES (DO THE RULES PASTE).'));
         }
         function radioOverseerOnAir(sid) {
@@ -6187,7 +6205,6 @@
             for (let i = 0; i <= pos.idx; i++) acc += (st.tracks[order[i]].d || 0);
             acc = acc % st.totalDur;
             radioWriteEpoch(sid, radioServerNow() - Math.round(acc * 1000));
-            showNotification('SKIPPED -- ALL SYNCED UNITS JUMP TOGETHER.');
         }
         function radioOverseerCut(sid) {
             const st = stationById(sid);
@@ -6196,7 +6213,7 @@
                 { label: 'CUT BROADCAST', color: '#ff3333', action: () => {
                     if (!window.db) { showNotification('NO SATELLITE LINK.'); return; }
                     window.firebaseRemove(window.firebaseRef(window.db, 'radio/' + sid))
-                        .then(() => showNotification('BROADCAST CUT.'))
+                        .then(() => {})
                         .catch(() => showNotification('CUT REJECTED -- CHECK RULES.'));
                 } },
                 { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
