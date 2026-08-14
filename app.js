@@ -381,7 +381,13 @@
         function startStarchedListener() {
             if (!window.db) return;
             window.firebaseOnValue(window.firebaseRef(window.db, 'world/starchedUnlocked'), (snap) => {
+                const wasGloballyEnabled = starchedGloballyUnlocked;
                 starchedGloballyUnlocked = snap.val() === true;
+                // v0.60: if Overseer disables globally, revoke player's unlock too
+                if (wasGloballyEnabled && !starchedGloballyUnlocked && starchedPlayerUnlocked) {
+                    starchedPlayerUnlocked = false;
+                    localStorage.removeItem('pipboy-starched');
+                }
                 updateStarchedUI();
             }, () => {});
         }
@@ -389,28 +395,30 @@
             const section = document.getElementById('starched-unlock-section');
             const btn = document.getElementById('starched-unlock-btn');
             const dna = document.getElementById('vb-starched');
-            if (starchedPlayerUnlocked) {
-                // Already unlocked — show DNA strand on vault-boy, hide button
-                if (section) section.style.display = 'none';
-                if (dna) dna.style.display = '';
-            } else if (starchedGloballyUnlocked) {
-                // Available but not yet unlocked — show button
+            if (starchedGloballyUnlocked) {
+                // Globally enabled — show toggle button
                 if (section) section.style.display = 'block';
-                if (dna) dna.style.display = 'none';
+                if (btn) {
+                    btn.innerText = starchedPlayerUnlocked ? '[🧬 STARCHED GENES: ON]' : '[🧬 STARCHED GENES: OFF]';
+                    btn.onclick = toggleStarchedGenes;
+                }
+                if (dna) dna.style.display = starchedPlayerUnlocked ? '' : 'none';
             } else {
-                // Not yet available — hide everything
+                // Not globally available — hide everything
                 if (section) section.style.display = 'none';
                 if (dna) dna.style.display = 'none';
             }
         }
-        function unlockStarchedGenes() {
-            if (starchedPlayerUnlocked) return;
-            showCustomPrompt('UNLOCK STARCHED GENES? YOUR MUTATIONS BECOME PERMANENT — DECONTAMINATION STATIONS CANNOT STRIP THEM. THIS IS IRREVERSIBLE.', [
-                { label: 'UNLOCK', color: '#ffb642', action: () => {
-                    starchedPlayerUnlocked = true;
-                    localStorage.setItem('pipboy-starched', 'true');
+        // v0.60: player can toggle Starched Genes on/off (was one-time unlock)
+        function toggleStarchedGenes() {
+            const newVal = !starchedPlayerUnlocked;
+            showCustomPrompt((newVal ? 'ENABLE' : 'DISABLE') + ' STARCHED GENES? ' + (newVal ? 'YOUR MUTATIONS BECOME PERMANENT — DECON CANNOT STRIP THEM.' : 'YOUR MUTATIONS CAN BE STRIPPED BY DECON STATIONS AGAIN.'), [
+                { label: newVal ? 'ENABLE' : 'DISABLE', color: '#ffb642', action: () => {
+                    starchedPlayerUnlocked = newVal;
+                    if (newVal) localStorage.setItem('pipboy-starched', 'true');
+                    else localStorage.removeItem('pipboy-starched');
                     updateStarchedUI();
-                    showNotification('🧬 STARCHED GENES UNLOCKED. YOUR MUTATIONS ARE PERMANENT.');
+                    showNotification('🧬 STARCHED GENES ' + (newVal ? 'ENABLED' : 'DISABLED') + '.');
                 }},
                 { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
             ]);
@@ -4947,12 +4955,31 @@
                 const c = contactByUid(e.to);
                 const terminal = (e.status === 'accepted' || e.status === 'declined' || e.status === 'fulfilled' || e.status === 'closed');
                 const clearable = terminal || e.status === 'queued';
+                const cancellable = (e.status === 'sent' || e.status === 'awaiting' || e.status === 'sending');
                 const row = document.createElement('div');
                 row.className = 'item-row';
                 row.style.cursor = 'default';
-                row.innerHTML = '<div class="item-info"><div>' + escapeHtml(e.summary) + '</div><div class="item-effects">→ ' + escapeHtml(c ? c.name : e.to) + ' — ' + escapeHtml(statusLabel(e)) + ' — ' + timeOf(e.ts) + '</div></div>' + (clearable ? '<button class="theme-btn" onclick="clearOutboxEntry(\'' + e.id + '\'); renderContracts();">[X]</button>' : '');
+                let actions = '';
+                if (cancellable) actions += '<button class="theme-btn" style="border-color:#ff3333; color:#ff3333;" onclick="cancelIssuedQuest(\'' + e.id + '\')">[CANCEL]</button>';
+                if (clearable) actions += '<button class="theme-btn" onclick="clearOutboxEntry(\'' + e.id + '\'); renderContracts();">[X]</button>';
+                row.innerHTML = '<div class="item-info"><div>' + escapeHtml(e.summary) + '</div><div class="item-effects">→ ' + escapeHtml(c ? c.name : e.to) + ' — ' + escapeHtml(statusLabel(e)) + ' — ' + timeOf(e.ts) + '</div></div>' + actions;
                 el.appendChild(row);
             });
+        }
+
+        // v0.60: cancel an issued quest (withdraw from outbox + delete Firebase letter)
+        function cancelIssuedQuest(id) {
+            const e = outbox.find(x => x.id === id);
+            if (!e) return;
+            const c = contactByUid(e.to);
+            showCustomPrompt('CANCEL ISSUED QUEST "' + escapeHtml(e.summary) + '" TO ' + escapeHtml(c ? c.name : e.to) + '? THE RECIPIENT\'S COPY WILL BE DELETED.', [
+                { label: 'CANCEL QUEST', color: '#ff3333', action: () => {
+                    clearOutboxEntry(id);
+                    renderContracts();
+                    showNotification('QUEST CANCELLED.');
+                }},
+                { label: 'KEEP IT', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
         }
 
         // --- PHOTO MAIL (v0.44 items 1/2): two-way confirmed links only ---
@@ -5313,6 +5340,7 @@
                     if (mailTabActive()) renderMail();
                 });
                 saveComms();
+                if (mailTabActive()) renderMail(); // v0.60: re-render mail feed so reply appears immediately
                 notifyTxResult();
             };
             if (attach.photo) {
