@@ -244,6 +244,164 @@
             if (el('fs-regret')) el('fs-regret').innerText = funStats.regret;
         }
 
+        // ==================== MUTATIONS (v0.58) ====================
+        // Double-edged S.P.E.C.I.A.L. modifiers gained randomly from radiation exposure.
+        // Trigger: userProfile.rads >= 250 (current, not lifetime) → 10% chance per radDamageTick.
+        // No cap — collect all 11. One clash pair: CARNIVORE/HERBIVORE can't coexist.
+        // Removal: ONLY at decontamination stations (decon zone, once per entry).
+        // Starched Genes perk: locks mutations permanently (decon can't strip).
+        const MUTATIONS = [
+            { id: 'egg_head', name: 'EGG HEAD', buff: {I:2}, debuff: {S:-2}, desc: '+2 INT / −2 STR' },
+            { id: 'marsupial', name: 'MARSUPIAL', buff: {A:2}, debuff: {E:-2}, desc: '+2 AGI / −2 END' },
+            { id: 'scaly', name: 'SCALY', buff: {E:2}, debuff: {C:-2}, desc: '+2 END / −2 CHA' },
+            { id: 'adrenal', name: 'ADRENAL', buff: {S:2}, debuff: {L:-2}, desc: '+2 STR / −2 LCK' },
+            { id: 'eagle_eyes', name: 'EAGLE EYES', buff: {P:2}, debuff: {A:-2}, desc: '+2 PER / −2 AGI' },
+            { id: 'thick_skin', name: 'THICK SKIN', buff: {E:2}, debuff: {I:-2}, desc: '+2 END / −2 INT' },
+            { id: 'glow_blood', name: 'GLOW BLOOD', buff: {L:2}, debuff: {P:-2}, desc: '+2 LCK / −2 PER' },
+            { id: 'carnivore', name: 'CARNIVORE', buff: {S:2}, debuff: {C:-2}, desc: '+2 STR / −2 CHA', clashes: ['herbivore'] },
+            { id: 'herbivore', name: 'HERBIVORE', buff: {E:2}, debuff: {S:-2}, desc: '+2 END / −2 STR', clashes: ['carnivore'] },
+            { id: 'nightkin', name: 'NIGHTKIN', buff: {P:2}, debuff: {S:-2}, desc: '+2 PER / −2 STR' },
+            { id: 'whisperer', name: 'WASTELAND WHISPERER', buff: {C:2}, debuff: {E:-2}, desc: '+2 CHA / −2 END' }
+        ];
+        let activeMutations = [];
+        (function loadMutations() {
+            try { activeMutations = JSON.parse(localStorage.getItem('pipboy-mutations') || '[]'); } catch (e) { activeMutations = []; }
+        })();
+        function saveMutations() {
+            try { localStorage.setItem('pipboy-mutations', JSON.stringify(activeMutations)); } catch (e) {}
+        }
+        // Recompute userProfile.special from baseSpecial + active mutations
+        function recomputeSpecial() {
+            if (!userProfile.baseSpecial) userProfile.baseSpecial = {...userProfile.special}; // first-time snapshot
+            const base = userProfile.baseSpecial;
+            const eff = {...base};
+            activeMutations.forEach(mid => {
+                const m = MUTATIONS.find(x => x.id === mid);
+                if (!m) return;
+                for (let k in m.buff) eff[k] = (eff[k] || 1) + m.buff[k];
+                for (let k in m.debuff) eff[k] = (eff[k] || 1) + m.debuff[k];
+            });
+            for (let k in eff) eff[k] = Math.max(1, Math.min(10, eff[k]));
+            userProfile.special = eff;
+        }
+        function gainMutation() {
+            const available = MUTATIONS.filter(m => {
+                if (activeMutations.indexOf(m.id) !== -1) return false; // already have it
+                if (m.clashes && m.clashes.some(c => activeMutations.indexOf(c) !== -1)) return false; // clash
+                return true;
+            });
+            if (!available.length) return; // all collected or clashing
+            const pick = available[Math.floor(Math.random() * available.length)];
+            activeMutations.push(pick.id);
+            recomputeSpecial();
+            calculateSkills();
+            saveMutations();
+            saveToStorage();
+            renderProfile();
+            showNotification('☢ MUTATION GAINED: ' + pick.name + ' (' + pick.desc + ')');
+        }
+        function loseMutation(id) {
+            const idx = activeMutations.indexOf(id);
+            if (idx === -1) return;
+            activeMutations.splice(idx, 1);
+            recomputeSpecial();
+            calculateSkills();
+            saveMutations();
+            saveToStorage();
+            renderProfile();
+            const m = MUTATIONS.find(x => x.id === id);
+            showNotification('🧬 MUTATION LOST: ' + (m ? m.name : id));
+        }
+        function loseRandomMutation() {
+            if (!activeMutations.length) return false;
+            const pick = activeMutations[Math.floor(Math.random() * activeMutations.length)];
+            loseMutation(pick);
+            return true;
+        }
+        // Mutation roll — called from radDamageTick when rads >= 250
+        function rollMutation() {
+            if (Math.random() < 0.10) gainMutation();
+        }
+
+        // v0.58: render active mutations list in the SPECIAL sub-tab
+        function renderMutations() {
+            const section = document.getElementById('mutations-section');
+            const list = document.getElementById('mutations-list-display');
+            if (!section || !list) return;
+            if (!activeMutations.length) {
+                section.style.display = userProfile.rads >= 250 ? 'block' : 'none';
+                list.innerHTML = '<p style="opacity:0.5;">NO ACTIVE MUTATIONS. ' + (userProfile.rads >= 250 ? 'KEEP IRRADIATING — THE WASTES ARE CHANGING YOU.' : 'REACH 250 RADS TO START MUTATING.') + '</p>';
+                return;
+            }
+            section.style.display = 'block';
+            let html = '';
+            activeMutations.forEach(mid => {
+                const m = MUTATIONS.find(x => x.id === mid);
+                if (!m) return;
+                html += '<div class="item-row" style="cursor:default;"><div class="item-info"><div style="color:#ff9a3c; text-shadow:0 0 5px #ff9a3c;">☢ ' + escapeHtml(m.name) + '</div><div class="item-effects">' + escapeHtml(m.desc) + '</div></div></div>';
+            });
+            if (starchedPlayerUnlocked) {
+                html += '<p style="font-size:0.85rem; opacity:0.7; margin-top:8px; color:#ffb642;">🧬 STARCHED GENES ACTIVE — MUTATIONS LOCKED.</p>';
+            }
+            list.innerHTML = html;
+        }
+
+        // ==================== STARCHED GENES (v0.58) ====================
+        // Global Overseer toggle: world/starchedUnlocked (Firebase boolean).
+        // Player unlock: one-time, stored in pipboy-starched localStorage.
+        // Effect: decon stations cannot strip mutations.
+        let starchedGloballyUnlocked = false;
+        let starchedPlayerUnlocked = localStorage.getItem('pipboy-starched') === 'true';
+        function startStarchedListener() {
+            if (!window.db) return;
+            window.firebaseOnValue(window.firebaseRef(window.db, 'world/starchedUnlocked'), (snap) => {
+                starchedGloballyUnlocked = snap.val() === true;
+                updateStarchedUI();
+            }, () => {});
+        }
+        function updateStarchedUI() {
+            const section = document.getElementById('starched-unlock-section');
+            const btn = document.getElementById('starched-unlock-btn');
+            const dna = document.getElementById('vb-starched');
+            if (starchedPlayerUnlocked) {
+                // Already unlocked — show DNA strand on vault-boy, hide button
+                if (section) section.style.display = 'none';
+                if (dna) dna.style.display = '';
+            } else if (starchedGloballyUnlocked) {
+                // Available but not yet unlocked — show button
+                if (section) section.style.display = 'block';
+                if (dna) dna.style.display = 'none';
+            } else {
+                // Not yet available — hide everything
+                if (section) section.style.display = 'none';
+                if (dna) dna.style.display = 'none';
+            }
+        }
+        function unlockStarchedGenes() {
+            if (starchedPlayerUnlocked) return;
+            showCustomPrompt('UNLOCK STARCHED GENES? YOUR MUTATIONS BECOME PERMANENT — DECONTAMINATION STATIONS CANNOT STRIP THEM. THIS IS IRREVERSIBLE.', [
+                { label: 'UNLOCK', color: '#ffb642', action: () => {
+                    starchedPlayerUnlocked = true;
+                    localStorage.setItem('pipboy-starched', 'true');
+                    updateStarchedUI();
+                    showNotification('🧬 STARCHED GENES UNLOCKED. YOUR MUTATIONS ARE PERMANENT.');
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+        function toggleStarchedGlobal() {
+            if (!window.db) { showNotification('NO SATELLITE LINK.'); return; }
+            const newVal = !starchedGloballyUnlocked;
+            showCustomPrompt((newVal ? 'ENABLE' : 'DISABLE') + ' STARCHED GENES GLOBALLY? ' + (newVal ? 'ALL PLAYERS WILL SEE THE UNLOCK BUTTON.' : 'THE UNLOCK BUTTON DISAPPEARS FOR EVERYONE.'), [
+                { label: newVal ? 'ENABLE' : 'DISABLE', color: '#ffb642', action: () => {
+                    window.firebaseSet(window.firebaseRef(window.db, 'world/starchedUnlocked'), newVal)
+                        .then(() => showNotification('STARCHED GENES ' + (newVal ? 'ENABLED' : 'DISABLED') + ' GLOBALLY.'))
+                        .catch(() => showNotification('FAILED — CHECK RULES.'));
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+
         // ONBOARDING LOGIC (v0.29: the G.O.A.T. exam is the SOLE S.P.E.C.I.A.L. allocator)
         const obSpecial = { S: 1, P: 1, E: 1, C: 1, I: 1, A: 1, L: 1 };
         const specialNames = { S: 'STRENGTH', P: 'PERCEPTION', E: 'ENDURANCE', C: 'CHARISMA', I: 'INTELLIGENCE', A: 'AGILITY', L: 'LUCK' };
@@ -837,6 +995,8 @@
             document.getElementById('skills-list-display').innerHTML = skHTML;
 
             renderVaultBoy(); // v0.50: STATUS graphic (databank pick) + overlays ride profile repaints
+            renderMutations(); // v0.58: active mutations list + starched indicator
+            updateStarchedUI(); // v0.58: starched genes button/DNA strand visibility
 
             let pkHTML = '';
             if (userProfile.perk) {
@@ -911,12 +1071,7 @@
             document.getElementById('faction-controls').style.display = (tabId === 'data' && currentDataTab === 'factions' && isDev) ? 'flex' : 'none';
             document.getElementById('dev-controls').style.display = (tabId === 'stat' && currentStatTab === 'stats') ? 'flex' : 'none';
             
-            document.getElementById('map-controls').style.display = (tabId === 'map' && isDev) ? 'flex' : 'none';
-            // v0.57: map camera overlay is always visible on the map tab (positioned on the map itself)
-            const addMarkerBtn = document.getElementById('dev-add-marker-btn');
-            const remMarkerBtn = document.getElementById('dev-remove-marker-btn');
-            if (addMarkerBtn) addMarkerBtn.style.display = isDev ? 'inline-block' : 'none';
-            if (remMarkerBtn) remMarkerBtn.style.display = isDev ? 'inline-block' : 'none';
+            // v0.58: footer map marker buttons removed (use long-press map or split-controls sidebar)
 
             if (tabId === 'stat' && currentStatTab === 'stats') renderStatsTab(); // v0.53
             if (tabId === 'mail') { renderMail(); refreshOutboxStatuses(); }      // v0.53: top-level MAIL tab
@@ -2572,9 +2727,11 @@
             Object.keys(lastKnownRadZones).forEach(zk => {
                 const z = lastKnownRadZones[zk];
                 if (!z || typeof z.lat !== 'number' || typeof z.lng !== 'number') return;
-                const med = z.kind === 'med';
-                const color = med ? '#5fc98e' : '#ff3333';
-                const glyph = med ? '✚' : '☢';
+                // v0.58: decon kind added — cyan/teal with ✦ glyph
+                const kind = z.kind || 'hot';
+                const color = kind === 'med' ? '#5fc98e' : (kind === 'decon' ? '#42d4f5' : '#ff3333');
+                const glyph = kind === 'med' ? '✚' : (kind === 'decon' ? '✦' : '☢');
+                const defaultLabel = kind === 'med' ? 'MED ZONE' : (kind === 'decon' ? 'DECON STATION' : 'HOT ZONE');
                 L.circle([z.lat, z.lng], {
                     radius: (typeof z.radius === 'number' ? z.radius : 15),
                     color: color, weight: 1.5, dashArray: '6 4',
@@ -2597,7 +2754,7 @@
                     iconAnchor: [7, 7]
                 });
                 const zm = L.marker([z.lat, z.lng], {icon: zoneIcon, zIndexOffset: 450})
-                    .bindTooltip(glyph + ' ' + String(z.label || (med ? 'MED ZONE' : 'HOT ZONE')).toUpperCase(), {
+                    .bindTooltip(glyph + ' ' + String(z.label || defaultLabel).toUpperCase(), {
                         permanent: false,
                         direction: 'bottom',
                         className: 'pip-tooltip'
@@ -2915,7 +3072,8 @@
                 lng: blng,
                 timestamp: Date.now(),
                 hp: Math.max(0, userProfile.maxHp - Math.floor((myRads / 1000) * userProfile.maxHp)),
-                rads: myRads
+                rads: myRads,
+                mutations: activeMutations.length // v0.58: broadcast mutation count for beacon indicator
             });
             lastBeaconAt = Date.now();
         }
@@ -3949,6 +4107,9 @@
         let medShelterActive = false; // v0.50: inside a ✚ MED ZONE fence (recovery x5)
         let radFieldRadius = 15;   // v0.56: radius of the field we're standing in (variable fences)
         let medShelterRadius = 15; // v0.56: radius of the shelter we're standing in
+        // v0.58: decontamination station state
+        let deconActive = false;   // currently inside a decon zone
+        let deconFired = false;    // effect already fired this visit (once per entry)
 
         function adjustRads(delta) {
             const before = userProfile.rads || 0;
@@ -3989,24 +4150,54 @@
                 // Zones: HOT irradiates everyone who steps in — pariahs included;
                 // v0.50: MED zones (kind 'med') never damage — they shelter, tracked separately
                 let nearestMed = null;
+                let nearestDecon = null; // v0.58: decontamination station
                 Object.keys(lastKnownRadZones).forEach(zk => {
                     const z = lastKnownRadZones[zk];
                     if (!z || typeof z.lat !== 'number' || typeof z.lng !== 'number') return;
                     const d = getDistance(myLastLat, myLastLng, z.lat, z.lng);
-                    // v0.56 BUGFIX: fences now bite at their REAL radius (v0.55 made radii
-                    // pickable but the engine still hard-coded 15m -- cosmetic-only fences).
                     const zr = (typeof z.radius === 'number') ? z.radius : 15;
                     if (z.kind === 'med') {
                         if (nearestMed === null || d < nearestMed.d) nearestMed = { d: d, r: zr };
+                        return;
+                    }
+                    // v0.58: decon stations — tracked separately, once-per-entry effect
+                    if (z.kind === 'decon') {
+                        if (nearestDecon === null || d < nearestDecon.d) nearestDecon = { d: d, r: zr };
                         return;
                     }
                     if (!nearest || d < nearest.d) {
                         nearest = { d: d, name: ('☢ ' + (z.label || 'HOT ZONE')), kind: 'HOT ZONE', r: zr };
                     }
                 });
-                // v0.56: med shelter grabs at the zone's own radius, releases 20% past it (15m legacy = grab 15 / release 18, unchanged)
+                // v0.56: med shelter grabs at the zone's own radius, releases 20% past it
                 if (!medShelterActive && nearestMed !== null && nearestMed.d <= nearestMed.r) { medShelterActive = true; medShelterRadius = nearestMed.r; }
                 else if (medShelterActive && (nearestMed === null || nearestMed.d > medShelterRadius * 1.2)) medShelterActive = false;
+                // v0.58: decon station hysteresis — once per entry, shed ALL rads + mutation strip roll
+                if (!deconActive && nearestDecon !== null && nearestDecon.d <= nearestDecon.r) {
+                    deconActive = true;
+                    deconFired = false; // fresh entry — effect hasn't fired yet
+                } else if (deconActive && (nearestDecon === null || nearestDecon.d > (nearestDecon ? nearestDecon.r : 15) * 1.2)) {
+                    deconActive = false;
+                    deconFired = false; // left the zone — reset for next entry
+                }
+                if (deconActive && !deconFired) {
+                    deconFired = true;
+                    // Shed ALL rads
+                    const radsBefore = userProfile.rads || 0;
+                    if (radsBefore > 0) adjustRads(-radsBefore);
+                    // Mutation strip roll (unless Starched Genes)
+                    if (starchedPlayerUnlocked) {
+                        showNotification('✦ DECONTAMINATION COMPLETE — RADS SHED. STARCHED GENES HOLD YOUR MUTATIONS.');
+                    } else if (activeMutations.length > 0 && Math.random() < 0.5) {
+                        const lostId = activeMutations[Math.floor(Math.random() * activeMutations.length)];
+                        const lostM = MUTATIONS.find(x => x.id === lostId);
+                        loseMutation(lostId);
+                        // loseMutation already shows a notification, but let's add decon context
+                        // (the loseMutation notification is sufficient)
+                    } else {
+                        showNotification('✦ DECONTAMINATION COMPLETE — RADS SHED. MUTATIONS HOLD.');
+                    }
+                }
                 renderVaultBoyFx(); // overlays repaint on any engine evaluation
             }
             // Hysteresis: the field GRABS at its radius and RELEASES 20% past it — no boundary
@@ -4055,6 +4246,8 @@
             if (!radFieldActive) return;
             adjustRads(1);
             geigerBurst(); // the counter is the only voice of the field now
+            // v0.58: mutation roll — only when current rads >= 250
+            if (userProfile.rads >= 250) rollMutation();
         }
         setInterval(radDamageTick, 5000);
         function radDecayTick() {
@@ -4139,12 +4332,22 @@
             } else {
                 zKeys.forEach(zk => {
                     const z = lastKnownRadZones[zk] || {};
-                    const med = z.kind === 'med'; // v0.50
-                    html += '<div class="item-row"><div class="item-info"><div style="color:' + (med ? '#5fc98e' : '#ff3333') + ';">' + (med ? '✚' : '☢') + ' ' + escapeHtml(z.label || (med ? 'MED ZONE' : 'HOT ZONE')) + '</div><div class="item-effects">DEPLOYED ' + timeOf(z.ts || Date.now()) + '</div></div><button class="theme-btn" onclick="extinguishZone(\'' + escapeHtml(zk) + '\')">[EXTINGUISH]</button></div>';
+                    // v0.58: kind-aware zone list (hot / med / decon)
+                    const zk2 = z.kind || 'hot';
+                    const zColor = zk2 === 'med' ? '#5fc98e' : (zk2 === 'decon' ? '#42d4f5' : '#ff3333');
+                    const zGlyph = zk2 === 'med' ? '✚' : (zk2 === 'decon' ? '✦' : '☢');
+                    const zLabel = zk2 === 'med' ? 'MED ZONE' : (zk2 === 'decon' ? 'DECON STATION' : 'HOT ZONE');
+                    html += '<div class="item-row"><div class="item-info"><div style="color:' + zColor + ';">' + zGlyph + ' ' + escapeHtml(z.label || zLabel) + '</div><div class="item-effects">DEPLOYED ' + timeOf(z.ts || Date.now()) + '</div></div><button class="theme-btn" onclick="extinguishZone(\'' + escapeHtml(zk) + '\')">[EXTINGUISH]</button></div>';
                 });
             }
-            html += '<div style="display:flex; gap:8px; margin-top:10px;"><button class="pip-btn" style="border-color:#ff3333; color:#ff3333; flex:1; margin:0;" onclick="dropHotZone(\'me\')">[☢ HOT ZONE AT MY POSITION]</button><button class="pip-btn" style="border-color:#5fc98e; color:#5fc98e; flex:1; margin:0;" onclick="dropMedZone(\'me\')">[✚ MED ZONE AT MY POSITION]</button></div>';
+            html += '<div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;"><button class="pip-btn" style="border-color:#ff3333; color:#ff3333; flex:1; margin:0; min-width:120px;" onclick="dropHotZone(\'me\')">[☢ HOT ZONE AT MY POSITION]</button><button class="pip-btn" style="border-color:#5fc98e; color:#5fc98e; flex:1; margin:0; min-width:120px;" onclick="dropMedZone(\'me\')">[✚ MED ZONE AT MY POSITION]</button><button class="pip-btn" style="border-color:#42d4f5; color:#42d4f5; flex:1; margin:0; min-width:120px;" onclick="dropDeconZone(\'me\')">[✦ DECON AT MY POSITION]</button></div>';
             html += '<p style="font-size:0.9rem; opacity:0.7; margin-top:8px; line-height:1.4;">LONG-PRESS THE MAP FOR PLACE-ANYWHERE DROPS (OVERSEER ONLY).</p>';
+            // v0.58: Starched Genes global toggle
+            html += '<div style="margin-top:20px; border-top:1px dashed #ffb642; padding-top:12px;">';
+            html += '<h3 style="color:#ffb642; text-shadow:0 0 6px #ffb642;">🧬 STARCHED GENES</h3>';
+            html += '<p style="font-size:0.9rem; opacity:0.75; margin-bottom:8px;">WHEN ENABLED, ALL PLAYERS SEE AN UNLOCK BUTTON IN THEIR STATS PANEL. ONCE UNLOCKED, DECON STATIONS CANNOT STRIP THEIR MUTATIONS.</p>';
+            html += '<button class="pip-btn" onclick="toggleStarchedGlobal()" style="border-color:#ffb642; color:#ffb642; border-style:dashed;">[STARCHED GENES: ' + (starchedGloballyUnlocked ? 'ENABLED' : 'DISABLED') + ']</button>';
+            html += '</div>';
             return html;
         }
 
@@ -4157,7 +4360,7 @@
             const r = (typeof radius === 'number' && radius >= 5 && radius <= 200) ? radius : 15;
             const key = 'z' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
             const zone = {
-                label: kind === 'med' ? 'MED ZONE' : 'HOT ZONE',
+                label: kind === 'med' ? 'MED ZONE' : (kind === 'decon' ? 'DECON STATION' : 'HOT ZONE'),
                 kind: kind, lat: lat, lng: lng, radius: r, ts: Date.now()
             };
             // v0.57: close the add-marker modal after deployment (was staying open); no ack toast needed
@@ -4215,12 +4418,25 @@
         // v0.50: the healing counterpart — −5 rads/min inside instead of the wasteland's 1
         function dropMedZone(where) { promptZoneRadius('med', where); } // v0.55: sized drops
 
+        // v0.58: decontamination station — fixed 15m, sheds ALL rads + mutation strip roll on entry
+        function dropDeconZone(where) {
+            if (where === 'map') {
+                if (tempWpLat === null || tempWpLng === null) { showNotification('NO POSITION SELECTED.'); return; }
+                showCustomPrompt('DEPLOY DECONTAMINATION STATION HERE? FIXED 15M RADIUS. SHEDS ALL RADS + 50% MUTATION STRIP ON ENTRY.', [
+                    { label: 'DEPLOY', color: '#42d4f5', action: () => { dropZone('decon', tempWpLat, tempWpLng, 15); } },
+                    { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+                ]);
+            } else {
+                dropZone('decon', myLastLat, myLastLng, 15);
+            }
+        }
+
         // v0.51: reachable from the STATS panel AND the map zone card; copy is
         // kind-aware (it always said HOT ZONE before, even for ✚ MED zones).
         function extinguishZone(key) {
             if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- ORDER NOT TRANSMITTED.'); return; }
             const z = lastKnownRadZones[key];
-            const noun = (z && z.kind === 'med') ? 'MED ZONE' : 'HOT ZONE';
+            const noun = (z && z.kind === 'med') ? 'MED ZONE' : ((z && z.kind === 'decon') ? 'DECON STATION' : 'HOT ZONE');
             showCustomPrompt('EXTINGUISH THIS ' + noun + '? ITS FIELD DIES IMMEDIATELY FOR ALL UNITS.', [
                 { label: 'EXTINGUISH', action: () => {
                     window.firebaseRemove(window.firebaseRef(window.db, 'radzones/' + key))
@@ -5442,15 +5658,20 @@
             if (!zk) return;
             const z = lastKnownRadZones[zk];
             if (!z) { deselectZone(); return; }
-            const med = z.kind === 'med';
-            const color = med ? '#5fc98e' : '#ff3333';
+            // v0.58: kind-aware zone card (hot / med / decon)
+            const kind = z.kind || 'hot';
+            const color = kind === 'med' ? '#5fc98e' : (kind === 'decon' ? '#42d4f5' : '#ff3333');
+            const glyph = kind === 'med' ? '✚ ' : (kind === 'decon' ? '✦ ' : '☢ ');
+            const defaultLabel = kind === 'med' ? 'MED ZONE' : (kind === 'decon' ? 'DECON STATION' : 'HOT ZONE');
             const nameEl = document.getElementById('muc-name');
-            nameEl.innerText = (med ? '✚ ' : '☢ ') + String(z.label || (med ? 'MED ZONE' : 'HOT ZONE')).toUpperCase();
+            nameEl.innerText = glyph + String(z.label || defaultLabel).toUpperCase();
             nameEl.style.color = color;
             const radius = (typeof z.radius === 'number' ? z.radius : 15);
-            let info = med
+            let info = kind === 'med'
                 ? 'MED SHELTER | ' + radius + 'M RADIUS | SHEDS 5 RADS/MIN INSIDE'
-                : 'RADIATION FIELD | ' + radius + 'M RADIUS | +1 RAD/5SEC INSIDE';
+                : (kind === 'decon'
+                    ? 'DECONTAMINATION | ' + radius + 'M | SHEDS ALL RADS + MUTATION CYCLE ON ENTRY'
+                    : 'RADIATION FIELD | ' + radius + 'M RADIUS | +1 RAD/5SEC INSIDE');
             if (myLastLat !== null && typeof z.lat === 'number' && typeof z.lng === 'number') {
                 const d = getDistance(myLastLat, myLastLng, z.lat, z.lng);
                 info += ' | ' + (d < 1000 ? Math.round(d) + 'M AWAY' : ((d / 1000).toFixed(1) + 'KM AWAY'));
@@ -5493,7 +5714,9 @@
                 info = 'SIGNAL LOST';
             }
             const nameEl = document.getElementById('muc-name');
-            nameEl.innerText = name;
+            // v0.58: orange mutant indicator next to name when beacon has mutations
+            const mutCount = (uid === myMailUid) ? activeMutations.length : ((b && typeof b.mutations === 'number') ? b.mutations : 0);
+            nameEl.innerHTML = escapeHtml(name) + (mutCount > 0 ? ' <span style="color:#ff9a3c; text-shadow:0 0 5px #ff9a3c;" title="' + mutCount + ' MUTATION' + (mutCount > 1 ? 'S' : '') + '">☢' + mutCount + '</span>' : '');
             nameEl.style.color = ''; // v0.51: reset any zone-card colour
             document.getElementById('muc-info').innerText = info;
             const actions = document.getElementById('muc-actions');
@@ -5549,6 +5772,7 @@
                 startMailListener();
                 startPariahListener(); // v0.46
                 startRadZoneListener(); // v0.47
+                startStarchedListener(); // v0.58: Starched Genes global toggle
                 flushOutbox();
                 refreshOutboxStatuses();
                 renderMailBadge();
@@ -6072,6 +6296,7 @@
 
 
         renderMailBadge();
+        recomputeSpecial(); // v0.58: apply any saved mutations to S.P.E.C.I.A.L. before first render
         hydrateLastFix(); // v0.56: self-dot from the persisted fix, even before GPS arms
         initComms();
         initRadio();      // v0.53: load the three-dial manifest + download badges

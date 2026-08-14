@@ -51,14 +51,19 @@
 <body class="crt">
 
     <div class="header">
-        <div style="display: flex; flex-direction: column;">
-            <div style="display: flex; align-items: baseline; gap: 10px;">
-                <span class="header-title" id="main-os-title">POX-BOY 3026</span>
-                <span style="font-size: 0.8rem; opacity: 0.5;">v0.58</span>
+        <div style="display: flex; flex-direction: column; flex: 1; min-width: 0;">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 6px;">
+                <div style="display: flex; align-items: baseline; gap: 8px; min-width: 0;">
+                    <span class="header-title" id="main-os-title">POX-BOY 3026</span>
+                    <span style="font-size: 0.8rem; opacity: 0.5; flex-shrink: 0;">v0.58</span>
+                </div>
+                <div id="hud-strip" style="display: flex; gap: 6px; align-items: center; flex-shrink: 0; white-space: nowrap;">
+                    <span id="pip-batt" style="font-size: 0.85rem; opacity: 0.8; display: none;"></span>
+                    <span id="hud-sat" style="font-size: 0.95rem; opacity: 0.3; color: var(--pip-color-dim); text-shadow: 0 0 5px currentColor;">⌖</span>
+                    <span id="hud-radio" style="font-size: 0.95rem; display: none; text-shadow: 0 0 5px currentColor;">♪</span>
+                </div>
             </div>
             <span id="pip-clock" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px;"></span>
-            <div style="display: flex; gap: 10px; align-items: center; margin-top: 2px;"><span id="hud-radio" style="font-size: 0.95rem; margin-right: 4px; display: none; text-shadow: 0 0 5px currentColor;">♪</span><span id="hud-sat" style="font-size: 0.95rem; margin-right: 4px; opacity: 0.3; color: var(--pip-color-dim); text-shadow: 0 0 5px currentColor;">⌖</span></div>
-            <span id="pip-batt" style="font-size: 0.9rem; opacity: 0.8; margin-top: 2px; display: none;"></span>
         </div>
         <div class="header-controls">
         </div>
@@ -97,6 +102,8 @@
                         <div id="vb-fx" style="position:absolute; inset:0; pointer-events:none;"></div>
                     </div>
                     <span id="vb-default" style="opacity:0.6; text-align:center;">[ VAULT BOY GRAPHIC HERE ]<br><span style="font-size:0.9rem;">TAP TO SET FROM DATABANK</span></span>
+                    <!-- v0.58: Starched Genes DNA strand lock indicator -->
+                    <span id="vb-starched" style="display:none; position:absolute; top:4px; right:4px; font-size:1.2rem; color:#ffb642; text-shadow:0 0 6px #ffb642;" title="STARCHED GENES ACTIVE">🧬🔒</span>
                 </div>
                 <p id="stat-name-display" style="text-align: center; font-size: 1.4rem; font-weight: bold; margin-bottom: 5px;">NAME: UNKNOWN</p>
                 <p style="text-align: center; opacity: 0.8; margin-bottom: 15px;">LVL 1 - INITIATE</p>
@@ -134,6 +141,13 @@
                 <div id="perks-list-display">
                     <!-- Populated by JS -->
                 </div>
+                <!-- v0.58: MUTATIONS — active mutations list (below perks, inside SPECIAL scroll) -->
+                <div id="mutations-section" style="margin-top: 25px; display: none;">
+                    <h2 style="color: #ff9a3c; text-shadow: 0 0 6px #ff9a3c;">☢ MUTATIONS</h2><br>
+                    <div id="mutations-list-display">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
             </div>
 
             <!-- SKILLS and PERKS removed as standalone tabs (v0.58: merged into SPECIAL above) -->
@@ -160,6 +174,11 @@
                     <p>TIMES NEAR DEATH: <span id="fs-neardth" style="color: #ff3333;">0</span></p>
                     <p>ENCLAVE MARCHES ENDURED: <span id="fs-marches">0</span></p>
                     <p>PHOTOGRAPHS REGRETTED: <span id="fs-regret">0</span></p>
+                </div>
+                <!-- v0.58: STARCHED GENES player unlock button (shown when Overseer enables globally) -->
+                <div id="starched-unlock-section" style="display:none; margin-top:20px; border-top:1px dashed var(--pip-color-dim); padding-top:15px;">
+                    <button class="pip-btn" id="starched-unlock-btn" onclick="unlockStarchedGenes()" style="border-color:#ffb642; color:#ffb642; border-style:dashed;">[🧬 UNLOCK STARCHED GENES]</button>
+                    <p style="font-size:0.85rem; opacity:0.7; margin-top:8px; line-height:1.4;">LOCK YOUR MUTATIONS IN PLACE. DECONTAMINATION STATIONS CANNOT STRIP THEM. ONE-TIME UNLOCK — PERMANENT.</p>
                 </div>
                 <!-- v0.46: OVERSEER PARIAH CONTROL — rendered by renderStatsTab, dev-mode only -->
                 <div id="overseer-pariahs" style="display:none; margin-top:25px;"></div>
@@ -400,10 +419,7 @@
                 <button class="theme-btn" onclick="openFactionAuth('ADD')">+ ADD FACTION</button>
                 <button class="theme-btn" onclick="openFactionAuth('EDIT')" style="border-style: dashed;">EDIT FACTION</button>
             </div>
-            <div id="map-controls" style="display: none; justify-content: center; gap: 10px;">
-                <button class="theme-btn" id="dev-add-marker-btn" onclick="openAddWaypointModal()" style="display: none;">+ ADD MARKER</button>
-                <button class="theme-btn" id="dev-remove-marker-btn" onclick="openRemoveWaypointModal()" style="border-style: dashed; display: none;">- REMOVE MARKER</button>
-            </div>
+            <!-- v0.58: map add/remove marker buttons removed from footer (use long-press map or split-controls sidebar) -->
             <!-- v0.58: map camera controls moved to overlay on the map itself -->
             <div id="dev-controls" style="display: none; justify-content: center; gap: 10px;">
                 <button class="theme-btn" onclick="triggerDevReset()" style="border-color: #ff3333; color: #ff3333;">FACTORY RESET</button>
@@ -727,8 +743,9 @@
 
             <!-- v0.50: OVERSEER zone placement — same long-press flow, true 15m fences drawn on every unit -->
             <div id="wp-overseer-zones" style="display:none; margin-bottom:12px;">
-                <button class="pip-btn" onclick="dropHotZone('map')" style="border-color:#ff3333; color:#ff3333; margin-bottom:8px;">[☢ HOT ZONE HERE (15M)]</button>
-                <button class="pip-btn" onclick="dropMedZone('map')" style="border-color:#5fc98e; color:#5fc98e;">[✚ MED ZONE HERE (15M)]</button>
+                <button class="pip-btn" onclick="dropHotZone('map')" style="border-color:#ff3333; color:#ff3333; margin-bottom:8px;">[☢ HOT ZONE HERE]</button>
+                <button class="pip-btn" onclick="dropMedZone('map')" style="border-color:#5fc98e; color:#5fc98e; margin-bottom:8px;">[✚ MED ZONE HERE]</button>
+                <button class="pip-btn" onclick="dropDeconZone('map')" style="border-color:#42d4f5; color:#42d4f5;">[✦ DECON STATION HERE (15M)]</button>
             </div>
 
             <button class="pip-btn" onclick="saveNewWaypoint()">SAVE MARKER</button>
