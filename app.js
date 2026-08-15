@@ -116,6 +116,10 @@
         // Backwards compatibility check for old saves
         if (userProfile.rads === undefined) userProfile.rads = 0;
 
+        // v0.67: Glowing One state
+        let isGlowingOne = localStorage.getItem('pipboy-glowing-one') === 'true';
+        let glowingOneChecked = localStorage.getItem('pipboy-glowing-one-checked') === 'true';
+
         let items = storedItems ? JSON.parse(storedItems) : [
             { id: 1, name: "10MM PISTOL", type: "weapons", effects: "DMG: 18", quantity: 1, equipped: true },
             { id: 4, name: "DRINK TICKET", type: "aid", effects: "Restores Thirst", quantity: 2, equipped: false }
@@ -2725,6 +2729,8 @@
                 const pinsRef = window.firebaseRef(window.db, 'sharedpins/');
                 window.firebaseOnValue(pinsRef, (snap) => { renderSharedPins(snap.val() || {}); }, () => {});
             }
+            // v0.63: render wastelanders list on map open (even if no beacon data yet)
+            renderWastelandersListMap();
         }
 
         // v0.56: the live signal census chip on the map edge
@@ -2893,11 +2899,13 @@
         function mapGoMe() {
             if (!pipMap) return;
             if (myLastLat === null || myLastLng === null) { showNotification('NO POSITION FIX -- ENABLE GPS TRACKING.'); return; }
-            // v0.63: ensure marker exists when centering
-            if (!userMarker) {
-                const isLive = gpsWatchId !== null;
-                ensureUserMarker(myLastLat, myLastLng, !isLive);
+            // v0.63: refresh dot state when centering (toggle to ensure marker updates)
+            if (userMarker) {
+                markersGroup.removeLayer(userMarker);
+                userMarker = null;
             }
+            const isLive = gpsWatchId !== null;
+            ensureUserMarker(myLastLat, myLastLng, !isLive);
             pipMap.setView([myLastLat, myLastLng], Math.max(pipMap.getZoom(), 16));
         }
         function mapFitAll() {
@@ -3176,7 +3184,8 @@
                 timestamp: Date.now(),
                 hp: Math.max(0, userProfile.maxHp - Math.floor((myRads / 1000) * userProfile.maxHp)),
                 rads: myRads,
-                mutations: activeMutations.length // v0.58: broadcast mutation count for beacon indicator
+                mutations: activeMutations.length, // v0.58: broadcast mutation count for beacon indicator
+                glowingOne: isGlowingOne // v0.67: broadcast Glowing One status
             });
             lastBeaconAt = Date.now();
         }
@@ -3270,7 +3279,7 @@
                 return;
             }
             pariahEl.style.display = 'block';
-            pariahEl.innerHTML = renderPariahPanel() + renderOverseerUserManagement();
+            pariahEl.innerHTML = renderPariahPanel() + renderOverseerUserManagement() + renderOverseerGlowingOnes();
         }
 
         // v0.63: overseer user management — view ALL users who have EVER broadcast, remove dead ones
@@ -3367,6 +3376,89 @@
                         removeNext();
                     }).catch(err => {
                         showNotification('Error loading users: ' + String(err));
+                    });
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
+            ]);
+        }
+
+        // v0.67: overseer Glowing One management — view and cure Glowing Ones
+        function renderOverseerGlowingOnes() {
+            let html = '<h3 style="color:#39ff14; text-shadow:0 0 6px #39ff14; margin-top:20px;">☢ GLOWING ONES</h3>';
+            html += '<p style="font-size:0.9rem; opacity:0.75; margin-bottom:10px;">PLAYERS TRANSFORMED BY RADIATION (OVERSEER CURE ONLY)</p>';
+            html += '<div id="overseer-glowing-list" style="max-height:300px; overflow-y:auto; border:1px dashed var(--pip-color-dim); padding:10px;">';
+            html += '<p style="opacity:0.5;">Loading...</p>';
+            html += '</div>';
+            html += '<button class="pip-btn" onclick="loadOverseerGlowingOnes()" style="margin-top:10px; border-style:dashed;">[REFRESH GLOWING ONES]</button>';
+            return html;
+        }
+
+        // v0.67: load all Glowing Ones from Firebase
+        function loadOverseerGlowingOnes() {
+            const el = document.getElementById('overseer-glowing-list');
+            if (!el || !window.db) {
+                if (el) el.innerHTML = '<p style="opacity:0.5;">No database connection</p>';
+                return;
+            }
+            el.innerHTML = '<p style="opacity:0.5;">Loading...</p>';
+            const usersRef = window.firebaseRef(window.db, 'wastelanders/');
+            window.firebaseGet(usersRef).then(snap => {
+                const data = snap.val() || {};
+                const now = Date.now();
+                const glowing = Object.keys(data).filter(uid => {
+                    const u = data[uid];
+                    return u.glowingOne === true && u.timestamp && (now - u.timestamp) < 5 * 60 * 1000; // live only
+                }).map(uid => {
+                    const u = data[uid];
+                    return { uid, name: u.name || 'UNKNOWN', rads: u.rads || 0 };
+                }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                if (!glowing.length) {
+                    el.innerHTML = '<p style="opacity:0.5;">No Glowing Ones found</p>';
+                    return;
+                }
+                let html = '<p style="margin-bottom:10px;">' + glowing.length + ' Glowing One' + (glowing.length > 1 ? 's' : '') + '</p>';
+                glowing.forEach(g => {
+                    html += '<div style="padding:6px 0; border-bottom:1px dashed var(--pip-color-dim);">';
+                    html += '<div style="font-weight:bold; color:#39ff14;">☢ ' + escapeHtml(g.name) + '</div>';
+                    html += '<div style="font-size:0.8rem; opacity:0.7;">Rads: ' + g.rads + '</div>';
+                    html += '<button class="pip-btn" onclick="cureGlowingOne(\'' + g.uid + '\', \'' + escapeHtml(g.name) + '\')" style="margin-top:5px; border-color:#39ff14; color:#39ff14; font-size:0.85rem;">[CURE]</button>';
+                    html += '</div>';
+                });
+                el.innerHTML = html;
+            }).catch(err => {
+                el.innerHTML = '<p style="color:#ff3333;">Error loading: ' + escapeHtml(String(err)) + '</p>';
+            });
+        }
+
+        // v0.67: cure a Glowing One (Overseer only)
+        function cureGlowingOne(uid, name) {
+            if (!window.db) {
+                showNotification('No database connection');
+                return;
+            }
+            showCustomPrompt('CURE ' + name + '? THIS WILL RESET THEIR RADIATION AND REMOVE GLOWING ONE STATUS.', [
+                { label: 'CURE', color: '#39ff14', action: () => {
+                    // Update their beacon to remove glowingOne flag and reset rads
+                    const userRef = window.firebaseRef(window.db, 'wastelanders/' + uid);
+                    window.firebaseGet(userRef).then(snap => {
+                        const data = snap.val();
+                        if (!data) {
+                            showNotification('User not found');
+                            return;
+                        }
+                        // Update with glowingOne: false and rads: 0
+                        window.firebaseSet(userRef, {
+                            ...data,
+                            glowingOne: false,
+                            rads: 0
+                        }).then(() => {
+                            showNotification(name + ' has been cured');
+                            loadOverseerGlowingOnes(); // refresh the list
+                        }).catch(err => {
+                            showNotification('Error curing: ' + String(err));
+                        });
+                    }).catch(err => {
+                        showNotification('Error loading user: ' + String(err));
                     });
                 }},
                 { label: 'CANCEL', color: 'var(--pip-color-dim)', action: () => {} }
@@ -3787,7 +3879,7 @@
             } catch (e) { rawURL = null; }
             // PIP -- theme phosphor crush + watermark + timestamp
             try {
-                const sf = 0.5;
+                const sf = 1.0; // v0.67: full resolution (was 0.5)
                 const baked = document.createElement('canvas');
                 baked.width = Math.max(1, Math.floor(canvas.width * sf));
                 baked.height = Math.max(1, Math.floor(canvas.height * sf));
@@ -3801,7 +3893,7 @@
                 bctx.font = "20px 'Courier New', Courier, monospace";
                 bctx.fillText('POX-BOY 3026 OS', 10, 30);
                 stampTimestamp(bctx, baked.width, baked.height, t.hex, 0.45);
-                pipURL = baked.toDataURL('image/jpeg', 0.6);
+                pipURL = baked.toDataURL('image/jpeg', 0.85); // v0.67: higher quality (was 0.6)
             } catch (e) { pipURL = null; }
             // GUARANTEE last resort: raw frame straight off the capture canvas
             if (!pipURL && !rawURL) {
@@ -4332,6 +4424,37 @@
                 const oldHp = Math.max(0, userProfile.maxHp - Math.floor((before / 1000) * userProfile.maxHp));
                 if (oldHp >= userProfile.maxHp * 0.2) bumpFunStat('nearDeath', 1);
             }
+            // v0.67: Glowing One transformation at 1000 rads
+            if (after === 1000 && before < 1000 && !isGlowingOne && !glowingOneChecked) {
+                glowingOneChecked = true;
+                if (Math.random() < 0.1) {
+                    // 1/10 chance: become a Glowing One
+                    isGlowingOne = true;
+                    localStorage.setItem('pipboy-glowing-one', 'true');
+                    localStorage.setItem('pipboy-glowing-one-checked', 'true');
+                    showNotification('☢ RADIATION SURGE — YOU HAVE BECOME A GLOWING ONE ☢');
+                    bumpFunStat('glowingOne', 1);
+                    // Announce to nearby players
+                    if (window.db && myMailUid && myLastLat !== null) {
+                        const announceRef = window.firebaseRef(window.db, 'glowingAnnouncements/' + myMailUid);
+                        window.firebaseSet(announceRef, {
+                            name: userProfile.name || 'UNKNOWN',
+                            lat: myLastLat,
+                            lng: myLastLng,
+                            timestamp: Date.now()
+                        }).catch(() => {});
+                    }
+                } else {
+                    // 9/10 chance: die (0 HP)
+                    showNotification('☢ CRITICAL RADIATION — YOU ARE DOWN ☢');
+                    bumpFunStat('radDeaths', 1);
+                }
+            }
+            // Reset Glowing One check when rads reset to 0
+            if (after === 0 && before > 0) {
+                glowingOneChecked = false;
+                localStorage.removeItem('pipboy-glowing-one-checked');
+            }
             userProfile.rads = after;
             saveToStorage();
             renderProfile();
@@ -4341,11 +4464,12 @@
         function evalPariahField() {
             // The condemned do not fear their own shadow: a declared pariah is self-immune…
             const selfMarked = !!(myMailUid && pariahMarks[myMailUid]);
+            const selfGlowing = isGlowingOne; // v0.67: Glowing Ones are self-immune
             let nearest = null;
             if (myLastLat !== null && myLastLng !== null) {
                 // …to PERSON fields. Stale signals do not irradiate: beacons older than
                 // 5 minutes are ignored.
-                if (!selfMarked) {
+                if (!selfMarked && !selfGlowing) {
                     Object.keys(pariahMarks).forEach(uid => {
                         const b = lastKnownBeaconData[uid];
                         if (!b || !b.timestamp || (Date.now() - b.timestamp) > 5 * 60 * 1000) return;
@@ -4353,6 +4477,17 @@
                         const d = getDistance(myLastLat, myLastLng, b.lat, b.lng);
                         if (!nearest || d < nearest.d) {
                             nearest = { d: d, name: ((pariahMarks[uid] || {}).name || b.name || 'PARIAH'), kind: 'PARIAH' };
+                        }
+                    });
+                    // v0.67: Glowing Ones also emit radiation (15m radius)
+                    Object.keys(lastKnownBeaconData).forEach(uid => {
+                        const b = lastKnownBeaconData[uid];
+                        if (!b || !b.glowingOne || uid === myMailUid) return; // skip self and non-glowing
+                        if (!b.timestamp || (Date.now() - b.timestamp) > 5 * 60 * 1000) return; // stale
+                        if (typeof b.lat !== 'number' || typeof b.lng !== 'number') return;
+                        const d = getDistance(myLastLat, myLastLng, b.lat, b.lng);
+                        if (d <= 15 && (!nearest || d < nearest.d)) {
+                            nearest = { d: d, name: (b.name || 'GLOWING ONE'), kind: 'GLOWING ONE' };
                         }
                     });
                 }
@@ -5289,12 +5424,19 @@
             const fx = document.getElementById('vb-fx');
             if (!wrap || !fx || wrap.style.display === 'none') return;
             wrap.classList.toggle('fx-rads', (userProfile.rads || 0) >= 250);
-            if (radFieldActive) {
+            // v0.67: Glowing One visual effect
+            if (isGlowingOne) {
+                fx.innerHTML = "<span class='vb-tre' style='left:6px;top:6px;color:#39ff14;text-shadow:0 0 10px #39ff14;'>☢</span><span class='vb-tre' style='right:6px;bottom:8px;color:#39ff14;text-shadow:0 0 10px #39ff14;animation-delay:.8s;'>☢</span><span class='vb-tre' style='right:10px;top:10px;color:#39ff14;text-shadow:0 0 10px #39ff14;animation-delay:1.4s;font-size:16px;'>☢</span>";
+                wrap.style.boxShadow = '0 0 20px #39ff14, inset 0 0 20px rgba(57, 255, 20, 0.3)';
+            } else if (radFieldActive) {
                 fx.innerHTML = "<span class='vb-tre' style='left:6px;top:6px;color:#ff9a3c;'>☢</span><span class='vb-tre' style='right:6px;bottom:8px;color:#ff9a3c;animation-delay:.8s;'>☢</span><span class='vb-tre' style='right:10px;top:10px;color:#ff9a3c;animation-delay:1.4s;font-size:16px;'>☢</span>";
+                wrap.style.boxShadow = '';
             } else if (medShelterActive) {
                 fx.innerHTML = "<span class='vb-cross' style='left:6px;top:6px;color:#5fc98e;'>✚</span><span class='vb-cross' style='right:8px;bottom:10px;color:#5fc98e;animation-delay:.7s;'>✚</span><span class='vb-cross' style='right:12px;top:12px;color:#5fc98e;animation-delay:1.5s;font-size:16px;'>✚</span>";
+                wrap.style.boxShadow = '';
             } else {
                 fx.innerHTML = '';
+                wrap.style.boxShadow = '';
             }
         }
 
@@ -6157,6 +6299,12 @@
             });
             const sb = document.getElementById('radio-sync-btn');
             if (sb) sb.innerText = '[ STATION SYNC: ' + (radioSyncOn ? 'ON' : 'OFF') + ' ]';
+            // v0.66: hide download button if all stations are already downloaded
+            const dlBtn = document.getElementById('radio-dl-btn');
+            if (dlBtn) {
+                const allDownloaded = radioManifest.stations.every(st => radioDlState[st.id]);
+                dlBtn.style.display = allDownloaded ? 'none' : '';
+            }
             renderRadioOverseer();
             updateHud(); // v0.56: header glyphs
         }
