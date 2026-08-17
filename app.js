@@ -2007,14 +2007,34 @@
 
         function promptForBountyField(field, data = {}) {
             if (field === 'target') {
-                // Show list of known wastelanders
-                const wastelanders = Object.entries(lastKnownBeaconData || {}).map(([uid, b]) => ({
-                    uid, name: b.name || 'UNKNOWN'
-                }));
+                // Show list of known wastelanders (beacons + rolodex)
+                const wastelanders = [];
+                const seenUids = new Set();
+                
+                // Add all beacons (live and cold)
+                Object.entries(lastKnownBeaconData || {}).forEach(([uid, b]) => {
+                    if (!seenUids.has(uid)) {
+                        wastelanders.push({ uid, name: b.name || 'UNKNOWN' });
+                        seenUids.add(uid);
+                    }
+                });
+                
+                // Add rolodex contacts (if not already in beacons)
+                rolodex.forEach(c => {
+                    if (!seenUids.has(c.uid)) {
+                        wastelanders.push({ uid: c.uid, name: c.name || 'UNKNOWN' });
+                        seenUids.add(c.uid);
+                    }
+                });
+                
                 if (wastelanders.length === 0) {
-                    showNotification('NO WASTELANDERS FOUND');
+                    showNotification('NO WASTELANDERS FOUND - SCAN DATACARDS FIRST');
                     return;
                 }
+                
+                // Sort by name
+                wastelanders.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                
                 const buttons = wastelanders.map(w => ({
                     label: w.name,
                     action: () => { data.targetUid = w.uid; data.targetName = w.name; promptForBountyField('reason', data); }
@@ -3275,15 +3295,19 @@
                     cold.push(entry);
                 }
             });
-            // Sort by distance (closest first), unknown distance at end
+            // Sort live by distance (closest first), cold by age (most recent first)
             const sortByDist = (a, b) => {
                 if (a.dist === null && b.dist === null) return 0;
                 if (a.dist === null) return 1;
                 if (b.dist === null) return -1;
                 return a.dist - b.dist;
             };
+            const sortByAge = (a, b) => {
+                // Most recent first (smallest ageMin first)
+                return a.ageMin - b.ageMin;
+            };
             live.sort(sortByDist);
-            cold.sort(sortByDist);
+            cold.sort(sortByAge);
             
             // Render live wastelanders
             if (!live.length) {
@@ -3677,7 +3701,11 @@
             } catch (e) {}
             return DEFAULT_DECOY;
         }
-        function scramblerOn() { return localStorage.getItem('pipboy-scrambler') === '1'; }
+        function scramblerOn() { 
+            // v0.71: default to ON (scrambled) for privacy
+            const val = localStorage.getItem('pipboy-scrambler');
+            return val === null || val === '1'; 
+        }
         function decoyCoords() {
             // Stable per-unit scatter seeded from the UID: N scrambled testers never share
             // one pixel, every client renders the identical layout, dots never wander.
@@ -5181,6 +5209,23 @@
                     html += '<div class="item-row"><div class="item-info"><div>' + escapeHtml(c.name || 'UNKNOWN') + (cold ? ' <span style="opacity:0.6;">(COLD)</span>' : '') + '</div></div><button class="theme-btn" style="color:#ff3333; border-color:#ff3333;" onclick="markPariah(\'' + escapeHtml(c.uid) + '\')">[MARK PARIAH]</button></div>';
                 });
             }
+            // v0.71: Cold wastelanders removal (overseer can clean up stale beacons)
+            const coldWastelanders = Object.keys(lastKnownBeaconData).filter(uid => {
+                if (uid === myMailUid) return false;
+                const b = lastKnownBeaconData[uid];
+                return b && b.timestamp && (now - b.timestamp) > 5 * 60 * 1000; // older than 5 min
+            });
+            html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:15px 0 10px; opacity:0.8;">COLD WASTELANDERS (>5MIN)</h3>';
+            if (!coldWastelanders.length) {
+                html += '<p style="opacity:0.5;">NO COLD SIGNALS TO REMOVE.</p>';
+            } else {
+                html += '<p style="font-size:0.85rem; opacity:0.7; margin-bottom:10px;">Remove stale beacons from Firebase to clean up the map.</p>';
+                coldWastelanders.forEach(uid => {
+                    const b = lastKnownBeaconData[uid];
+                    const ageMin = Math.floor((now - b.timestamp) / 60000);
+                    html += '<div class="item-row"><div class="item-info"><div>' + escapeHtml(b.name || 'UNKNOWN') + '</div><div class="item-effects">LAST SEEN ' + ageMin + 'M AGO</div></div><button class="theme-btn" style="color:#ff3333; border-color:#ff3333;" onclick="removeColdWastelander(\'' + escapeHtml(uid) + '\')">[REMOVE]</button></div>';
+                });
+            }
             // v0.47: HOT ZONES — static radiation fields the Overseer drops at a spot.
             // No auto-expiry: they burn until EXTINGUISH (decree-style control).
             html += '<h3 style="border-bottom:1px dashed var(--pip-color-dim); padding-bottom:5px; margin:15px 0 10px; opacity:0.8;">ZONES</h3>'; // v0.55: sizes are pickable now, no longer static-15m
@@ -5330,6 +5375,25 @@
                     window.firebaseRemove(window.firebaseRef(window.db, 'pariahs/' + uid))
                         .then(() => showNotification('PARIAH CLEANSED: ' + name))
                         .catch(() => showNotification('CLEANSE FAILED -- CHECK SIGNAL.'));
+                }},
+                { label: 'CANCEL', color: 'var(--pip-color-dim)' }
+            ]);
+        }
+
+        // v0.71: Remove cold wastelander from Firebase (overseer cleanup)
+        function removeColdWastelander(uid) {
+            if (!window.db || navigator.onLine === false) { showNotification('NO SIGNAL -- REMOVE NOT TRANSMITTED.'); return; }
+            const b = lastKnownBeaconData[uid];
+            const name = (b && b.name) ? b.name.toUpperCase() : 'UNKNOWN';
+            showCustomPrompt('REMOVE ' + name + ' FROM MAP? THEIR BEACON WILL BE DELETED FROM FIREBASE.', [
+                { label: 'REMOVE', color: '#ff3333', action: () => {
+                    window.firebaseRemove(window.firebaseRef(window.db, 'wastelanders/' + uid))
+                        .then(() => {
+                            showNotification('WASTELANDER REMOVED: ' + name);
+                            // Refresh the overseer panel
+                            if (overseerPaneActive()) renderOverseerTab();
+                        })
+                        .catch(() => showNotification('REMOVE FAILED -- CHECK SIGNAL.'));
                 }},
                 { label: 'CANCEL', color: 'var(--pip-color-dim)' }
             ]);
@@ -6795,14 +6859,19 @@
                 if (!row) return;
                 const state = row.querySelector('.rs-state');
                 const live = !!(radioLive[st.id] && radioLive[st.id].epoch); // v0.54 LIVE badge
-                let txt = radioDlState[st.id]
-                    ? 'ONBOARD'
-                    : (st.tracks.length + ' TRKS · ' + (st.tracks.reduce((a, t) => a + t.b, 0) / 1048576).toFixed(1) + 'MB');
+                let txt;
+                if (st.tracks.length === 0) {
+                    txt = 'NO CONNECTION';
+                } else {
+                    txt = radioDlState[st.id]
+                        ? 'ONBOARD'
+                        : (st.tracks.length + ' TRKS · ' + (st.tracks.reduce((a, t) => a + t.b, 0) / 1048576).toFixed(1) + 'MB');
+                }
                 if (live) txt = '· LIVE · ' + txt;
                 if (state) {
                     state.innerText = txt;
-                    state.style.color = live ? '#ffb642' : '';
-                    state.style.textShadow = live ? '0 0 5px #ffb642' : '';
+                    state.style.color = live ? '#ffb642' : (st.tracks.length === 0 ? '#ff3333' : '');
+                    state.style.textShadow = live ? '0 0 5px #ffb642' : (st.tracks.length === 0 ? '0 0 5px #ff3333' : '');
                 }
                 row.classList.toggle('playing', radioCur === st.id);
             });
@@ -6811,7 +6880,7 @@
             // v0.66: hide download button if all stations are already downloaded
             const dlBtn = document.getElementById('radio-dl-btn');
             if (dlBtn) {
-                const allDownloaded = radioManifest.stations.every(st => radioDlState[st.id]);
+                const allDownloaded = radioManifest.stations.every(st => radioDlState[st.id] || st.tracks.length === 0);
                 dlBtn.style.display = allDownloaded ? 'none' : '';
             }
             renderRadioOverseer();
@@ -6821,6 +6890,7 @@
         function radioStationTap(sid) {
             const st = stationById(sid);
             if (!st) { showNotification('STATION LIST NOT LOADED YET -- CHECK SIGNAL.'); return; }
+            if (st.tracks.length === 0) { showNotification('NO CONNECTION - STATION UNAVAILABLE'); return; }
             if (radioCur === sid) { radioStop(); return; } // tapping the live dial kills it
             radioCur = sid;
             if (radioIsSynced(sid)) {

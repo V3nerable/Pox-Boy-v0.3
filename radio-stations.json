@@ -654,6 +654,20 @@
      "d": 155.87
     }
    ]
+  },
+  {
+   "id": "unknown",
+   "name": "UNKNOWN TRANSMISSION",
+   "item": "pox-radio-unknown",
+   "base": "https://pox-alt-radio.netlify.app/unknown",
+   "tracks": []
+  },
+  {
+   "id": "waste",
+   "name": "W.A.S.T.E FM",
+   "item": "pox-radio-waste",
+   "base": "https://pox-alt-radio.netlify.app/w.a.s.t.e",
+   "tracks": []
   }
  ]
 }
