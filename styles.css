@@ -111,6 +111,8 @@
         #tab-cam.active { display: flex !important; }
         .sub-tab-content { display: none; }
         .sub-tab-content.active { display: block; }
+        .quest-tab-content { display: none; }
+        .quest-tab-content.active { display: block; }
 
         /* Stats Layout */
         .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
@@ -529,3 +531,252 @@ html.plock-90 #pre-boot-box,  html.plock-270 #pre-boot-box  { max-height: 96vw !
             box-shadow: 0 0 6px var(--pip-color-dim);
         }
         .map-overlay-btn:active { background: var(--pip-color); color: var(--pip-bg); text-shadow: none; }
+
+/* ============ PDA THEME (v0.69) ============ */
+/* S.T.A.L.K.E.R. PDA style — dev-only activation via theme cycle */
+body.pda-theme {
+    background: #1a1a1a !important;
+    font-family: 'Courier New', 'Consolas', monospace !important;
+}
+
+/* Override CRT scanlines for PDA theme */
+body.pda-theme::before,
+body.pda-theme::after {
+    display: none !important;
+}
+
+/* Header styling */
+body.pda-theme .header {
+    background: #2a2a2a !important;
+    border: 2px solid #4a4a4a !important;
+    box-shadow: none !important;
+}
+
+body.pda-theme .header-title {
+    letter-spacing: 2px !important;
+    text-shadow: none !important;
+}
+
+/* Tab navigation */
+body.pda-theme .nav-tabs {
+    border-bottom: 2px solid #4a4a4a !important;
+}
+
+body.pda-theme .nav-item {
+    background: #2a2a2a !important;
+    border: 2px solid #4a4a4a !important;
+    border-bottom: none !important;
+    text-shadow: none !important;
+    letter-spacing: 1px !important;
+    opacity: 0.6 !important;
+}
+
+body.pda-theme .nav-item.active {
+    background: #1a1a1a !important;
+    border-color: var(--pip-color) !important;
+    opacity: 1 !important;
+}
+
+/* Content boxes */
+body.pda-theme .content-area {
+    background: transparent !important;
+}
+
+body.pda-theme .sub-nav {
+    border-bottom: 2px solid #4a4a4a !important;
+}
+
+body.pda-theme .sub-nav-item {
+    text-shadow: none !important;
+    letter-spacing: 1px !important;
+}
+
+/* Buttons */
+body.pda-theme .pip-btn,
+body.pda-theme .theme-btn {
+    background: #2a2a2a !important;
+    border: 2px solid #4a4a4a !important;
+    text-shadow: none !important;
+    letter-spacing: 1px !important;
+    box-shadow: none !important;
+}
+
+body.pda-theme .pip-btn:hover,
+body.pda-theme .theme-btn:hover {
+    background: #4a4a4a !important;
+    border-color: var(--pip-color) !important;
+}
+
+body.pda-theme .pip-btn:active,
+body.pda-theme .theme-btn:active {
+    background: var(--pip-color) !important;
+    color: #1a1a1a !important;
+}
+
+/* List items */
+body.pda-theme .item-row {
+    background: #2a2a2a !important;
+    border: 2px solid #4a4a4a !important;
+    margin-bottom: 8px !important;
+}
+
+body.pda-theme .item-row:hover {
+    border-color: var(--pip-color) !important;
+    background: #2a2a2a !important;
+}
+
+/* Form inputs */
+body.pda-theme .pip-input {
+    background: #1a1a1a !important;
+    border: 2px solid #4a4a4a !important;
+    text-shadow: none !important;
+}
+
+body.pda-theme .pip-input:focus {
+    border-color: var(--pip-color) !important;
+}
+
+/* Status bars */
+body.pda-theme .hp-bar,
+body.pda-theme .rads-bar,
+body.pda-theme .ap-bar {
+    border: 2px solid #4a4a4a !important;
+    background: #1a1a1a !important;
+}
+
+body.pda-theme .hp-fill,
+body.pda-theme .ap-fill {
+    box-shadow: none !important;
+}
+
+body.pda-theme .rads-fill {
+    box-shadow: none !important;
+}
+
+/* Map container */
+body.pda-theme #map-container {
+    border: 2px solid #4a4a4a !important;
+    background: #1a1a1a !important;
+}
+
+/* Map overlay buttons */
+body.pda-theme .map-overlay-btn {
+    background: #2a2a2a !important;
+    border: 2px solid #4a4a4a !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+}
+
+body.pda-theme .map-overlay-btn:hover {
+    border-color: var(--pip-color) !important;
+}
+
+/* Modals */
+body.pda-theme .modal-content {
+    background: #2a2a2a !important;
+    border: 2px solid #4a4a4a !important;
+    box-shadow: none !important;
+}
+
+/* Warning/info boxes */
+body.pda-theme .warning-box {
+    background: #1a1a1a !important;
+    border: 2px solid var(--pip-color-dim) !important;
+}
+
+body.pda-theme .info-box {
+    background: #1a1a1a !important;
+    border: 2px solid #4a4a4a !important;
+}
+
+/* Glowing One effect */
+body.pda-theme .glowing-one {
+    border-color: var(--pip-color) !important;
+    box-shadow: 0 0 10px var(--pip-color) !important;
+}
+
+/* Mail pip animation override */
+body.pda-theme .mail-pip {
+    text-shadow: none !important;
+    animation: none !important;
+}
+
+/* HUD blink override */
+body.pda-theme .hud-blink {
+    animation: none !important;
+}
+
+/* Vault boy container */
+body.pda-theme .vault-boy-container {
+    border: 2px solid #4a4a4a !important;
+    background: #2a2a2a !important;
+}
+
+/* Photo tiles */
+body.pda-theme .photo-tile {
+    border: 2px solid #4a4a4a !important;
+}
+
+body.pda-theme .photo-tile:hover {
+    border-color: var(--pip-color) !important;
+}
+
+/* Radio stations */
+body.pda-theme .radio-station {
+    background: #2a2a2a !important;
+    border: 2px solid #4a4a4a !important;
+    margin-bottom: 8px !important;
+}
+
+body.pda-theme .radio-station:hover,
+body.pda-theme .radio-station.playing {
+    border-color: var(--pip-color) !important;
+    background: #2a2a2a !important;
+}
+
+/* Keyboard */
+body.pda-theme #keyboard-modal .modal-content {
+    background: #2a2a2a !important;
+    border: 2px solid #4a4a4a !important;
+}
+
+body.pda-theme .vk-btn {
+    background: #1a1a1a !important;
+    border: 2px solid #4a4a4a !important;
+    text-shadow: none !important;
+}
+
+body.pda-theme .vk-btn:hover {
+    background: #4a4a4a !important;
+    border-color: var(--pip-color) !important;
+}
+
+/* Quest objectives */
+body.pda-theme .quest-objective {
+    border-left: 2px solid #4a4a4a !important;
+}
+
+/* Footer */
+body.pda-theme .footer {
+    border-top: 2px solid #4a4a4a !important;
+    background: #2a2a2a !important;
+}
+
+/* Scrollbar styling for PDA theme */
+body.pda-theme ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+body.pda-theme ::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+body.pda-theme ::-webkit-scrollbar-thumb {
+    background: #4a4a4a;
+    border: 1px solid #2a2a2a;
+}
+
+body.pda-theme ::-webkit-scrollbar-thumb:hover {
+    background: var(--pip-color);
+}

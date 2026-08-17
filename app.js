@@ -185,7 +185,12 @@
               camFx: "sepia(100%) hue-rotate(170deg) saturate(280%) brightness(0.8) contrast(1.8)" },
             { name: "WHITE", hex: "#ffffff", dim: "#888888", rgb: "255, 255, 255",
               mapFx: "grayscale(100%) brightness(1.05) contrast(1.3)",
-              camFx: "grayscale(90%) brightness(0.85) contrast(1.7)" }
+              camFx: "grayscale(90%) brightness(0.85) contrast(1.7)" },
+            // v0.69: PDA theme (dev-only, S.T.A.L.K.E.R. style)
+            { name: "PDA", hex: "#d4a574", dim: "#8b7355", rgb: "212, 165, 116",
+              mapFx: "sepia(80%) hue-rotate(-20deg) saturate(150%) brightness(0.9) contrast(1.1)",
+              camFx: "sepia(80%) hue-rotate(-20deg) saturate(150%) brightness(0.85) contrast(1.2)",
+              pda: true }
         ];
         let currentThemeIndex = 0;
 
@@ -1142,19 +1147,20 @@
                 currentInvTab = subTabId; // v0.53: INV tab retired; branch kept inert for stale callers
                 renderInventory(subTabId);
             } else if (parentTab === 'stat') {
-                // v0.58: STAT sub-tabs are now STATUS / SPECIAL / STATS / OVERSEER / OPTIONS
+                // v0.70: STAT sub-tabs are now STATUS / SPECIAL / STATS / FACTIONS / OVERSEER / OPTIONS
                 currentStatTab = subTabId;
                 document.getElementById('dev-controls').style.display = (subTabId === 'stats') ? 'flex' : 'none';
+                document.getElementById('faction-controls').style.display = (subTabId === 'factions' && isDev) ? 'flex' : 'none';
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
                 const target = document.getElementById(`sub-${parentTab}-${subTabId}`);
                 if (target) target.classList.add('active');
                 if (subTabId === 'stats') renderStatsTab();
+                if (subTabId === 'factions') renderFactions();
                 if (subTabId === 'overseer') renderOverseerTab();
             } else if (parentTab === 'data') {
-                // v0.57: DATA sub-tabs are now QUESTS / CONTRACTS / WASTELANDERS / FACTIONS (OPTIONS moved to STAT)
+                // v0.70: DATA sub-tabs are now QUESTS / CONTRACTS / WASTELANDERS (FACTIONS moved to STAT)
                 currentDataTab = subTabId;
                 document.getElementById('add-quest-btn').style.display = (subTabId === 'quests' && isDev) ? 'inline-block' : 'none';
-                document.getElementById('faction-controls').style.display = (subTabId === 'factions' && isDev) ? 'flex' : 'none';
                 const devBtns = document.getElementById('dev-controls'); if (devBtns && subTabId !== '_mail') devBtns.style.display = (currentStatTab === 'stats' && document.getElementById('tab-stat').classList.contains('active')) ? 'flex' : 'none';
 
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
@@ -1162,7 +1168,6 @@
                 if (dataTarget) dataTarget.classList.add('active');
                 if (subTabId === 'quests') renderQuests();
                 if (subTabId === 'contracts') renderContracts();
-                if (subTabId === 'factions') renderFactions();
                 if (subTabId === 'wastelanders') { renderWastelanders(); renderLinkRequests(); }
             } else {
                 document.getElementById(`tab-${parentTab}`).querySelectorAll('.sub-tab-content').forEach(el => el.classList.remove('active'));
@@ -1171,7 +1176,14 @@
         }
 
         function cycleTheme() {
-            currentThemeIndex = (currentThemeIndex + 1) % themes.length;
+            // v0.69: skip PDA theme unless dev mode is active
+            const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
+            let nextIndex = (currentThemeIndex + 1) % themes.length;
+            // Skip PDA theme if not in dev mode
+            if (!isDev && themes[nextIndex].pda) {
+                nextIndex = (nextIndex + 1) % themes.length;
+            }
+            currentThemeIndex = nextIndex;
             const t = themes[currentThemeIndex];
             const root = document.documentElement;
             root.style.setProperty('--pip-color', t.hex);
@@ -1180,6 +1192,8 @@
             root.style.setProperty('--pip-rgb', t.rgb);
             // Theme-tinted hardware outputs: map tiles + camera sensor + QR scanner feed
             root.style.setProperty('--tile-filter', t.mapFx);
+            // v0.69: toggle PDA theme class on body
+            document.body.classList.toggle('pda-theme', !!t.pda);
             applyCamFilter(); // v0.35: routed so NIGHT MODE gain survives theme swaps
             // v0.33: header theme button moved to DATA > OPTIONS; label targets may be absent
             const themeLblLegacy = document.getElementById('theme-display');
@@ -1744,9 +1758,10 @@
         }
 
         function renderQuests() {
-            const container = document.getElementById('sub-data-quests');
+            const container = document.getElementById('quest-tab-direct');
+            if (!container) return;
             container.innerHTML = '';
-            if (quests.length === 0) return container.innerHTML = '<p style="text-align:center; opacity:0.5;">NO QUESTS ACTIVE</p>';
+            if (quests.length === 0) return container.innerHTML = '<p style="text-align:center; opacity:0.5;">NO DIRECT QUESTS</p>';
             
             quests.forEach(q => {
                 const el = document.createElement('div'); 
@@ -1786,6 +1801,417 @@
                 }
                 container.appendChild(el);
             });
+        }
+
+        // v0.70: Quest tab switching (Direct / Global / Bounties)
+        function switchQuestTab(tabId) {
+            const subNav = document.getElementById('quest-sub-nav');
+            if (!subNav) return;
+            subNav.querySelectorAll('.sub-nav-item').forEach(el => {
+                const oc = el.getAttribute('onclick') || '';
+                el.classList.toggle('active', oc.includes("'" + tabId + "'"));
+            });
+            document.querySelectorAll('.quest-tab-content').forEach(el => {
+                el.classList.remove('active');
+                el.style.display = 'none';
+            });
+            const target = document.getElementById('quest-tab-' + tabId);
+            if (target) {
+                target.classList.add('active');
+                target.style.display = 'block';
+            }
+            // Render the appropriate tab
+            if (tabId === 'direct') renderQuests();
+            else if (tabId === 'global') renderGlobalContracts();
+            else if (tabId === 'bounties') renderBounties();
+        }
+
+        // v0.70: Render global contracts
+        function renderGlobalContracts() {
+            const container = document.getElementById('quest-tab-global');
+            if (!container) return;
+            container.innerHTML = '';
+            
+            const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
+            if (isDev) {
+                container.innerHTML += '<button class="theme-btn" onclick="createGlobalContract()" style="width:100%; border-style:dashed; margin-bottom:15px;">[+ CREATE GLOBAL CONTRACT]</button>';
+            }
+            
+            const contracts = Object.entries(globalContracts).filter(([id, c]) => c.status === 'open');
+            if (contracts.length === 0) {
+                container.innerHTML += '<p style="text-align:center; opacity:0.5;">NO GLOBAL CONTRACTS AVAILABLE</p>';
+                return;
+            }
+            
+            contracts.forEach(([id, c]) => {
+                const el = document.createElement('div');
+                el.className = 'item-row';
+                el.style.flexDirection = 'column';
+                el.onclick = () => openGlobalContractModal(id, c);
+                
+                const typeLabel = c.type === 'first' ? 'FIRST TO COMPLETE' : (c.type === 'many' ? 'MANY CAN COMPLETE' : 'TIMED');
+                const expiresStr = c.expiresAt ? `EXPIRES: ${new Date(c.expiresAt).toLocaleString()}` : 'NO EXPIRY';
+                
+                el.innerHTML = `
+                    <div style="display: flex; justify-content: space-between;">
+                        <div>■ ${escapeHtml(c.title)}</div>
+                        <div style="font-size: 0.85rem; opacity: 0.7;">${typeLabel}</div>
+                    </div>
+                    <div style="font-size: 0.85rem; opacity: 0.7; margin-top: 4px;">ISSUED BY: ${escapeHtml(c.issuerName || 'UNKNOWN')}</div>
+                    <div style="font-size: 0.85rem; opacity: 0.6; margin-top: 2px;">${expiresStr}</div>
+                    <div style="margin-top: 6px; font-size: 0.9rem;">${escapeHtml(c.description || '')}</div>
+                    ${c.reward ? `<div style="margin-top: 4px; font-size: 0.85rem; color: #5fc98e;">REWARD: ${escapeHtml(c.reward)}</div>` : ''}
+                `;
+                container.appendChild(el);
+            });
+        }
+
+        // v0.70: Render bounties
+        function renderBounties() {
+            const container = document.getElementById('quest-tab-bounties');
+            if (!container) return;
+            container.innerHTML = '';
+            
+            const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
+            if (isDev) {
+                container.innerHTML += '<button class="theme-btn" onclick="createBounty()" style="width:100%; border-style:dashed; margin-bottom:15px;">[+ POST BOUNTY]</button>';
+            }
+            
+            const openBounties = Object.entries(bounties).filter(([id, b]) => b.status === 'open');
+            if (openBounties.length === 0) {
+                container.innerHTML += '<p style="text-align:center; opacity:0.5;">NO OPEN BOUNTIES</p>';
+                return;
+            }
+            
+            openBounties.forEach(([id, b]) => {
+                const el = document.createElement('div');
+                el.className = 'item-row';
+                el.style.flexDirection = 'column';
+                el.onclick = () => openBountyModal(id, b);
+                
+                const expiresStr = b.expiresAt ? `EXPIRES: ${new Date(b.expiresAt).toLocaleString()}` : 'NO EXPIRY';
+                
+                el.innerHTML = `
+                    <div style="display: flex; justify-content: space-between;">
+                        <div>☠ ${escapeHtml(b.targetName)}</div>
+                        <div style="font-size: 0.85rem; color: #ff3333;">BOUNTY</div>
+                    </div>
+                    <div style="font-size: 0.85rem; opacity: 0.7; margin-top: 4px;">POSTED BY: ${escapeHtml(b.issuerName || 'UNKNOWN')}</div>
+                    <div style="font-size: 0.85rem; opacity: 0.6; margin-top: 2px;">${expiresStr}</div>
+                    <div style="margin-top: 6px; font-size: 0.9rem;">${escapeHtml(b.reason || '')}</div>
+                    ${b.reward ? `<div style="margin-top: 4px; font-size: 0.85rem; color: #ffb642;">REWARD: ${escapeHtml(b.reward)}</div>` : ''}
+                `;
+                container.appendChild(el);
+            });
+        }
+
+        // v0.70: Create global contract (overseer only)
+        function createGlobalContract() {
+            const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
+            if (!isDev) { showNotification('OVERSEER ACCESS REQUIRED'); return; }
+            
+            showCustomPrompt('CREATE GLOBAL CONTRACT', [
+                { label: 'TITLE', action: () => promptForContractField('title') },
+                { label: 'CANCEL', color: '#ff3333', action: () => {} }
+            ]);
+        }
+
+        function promptForContractField(field, data = {}) {
+            const fields = ['title', 'description', 'type', 'reward', 'expiresAt'];
+            const idx = fields.indexOf(field);
+            
+            if (field === 'title') {
+                showCustomPrompt('CONTRACT TITLE', [
+                    { label: 'ENTER TITLE', action: () => {
+                        const title = prompt('Enter contract title:');
+                        if (title) { data.title = title; promptForContractField('description', data); }
+                    }},
+                    { label: 'CANCEL', color: '#ff3333', action: () => {} }
+                ]);
+            } else if (field === 'description') {
+                showCustomPrompt('CONTRACT DESCRIPTION', [
+                    { label: 'ENTER DESCRIPTION', action: () => {
+                        const desc = prompt('Enter contract description:');
+                        data.description = desc || '';
+                        promptForContractField('type', data);
+                    }},
+                    { label: 'SKIP', action: () => { data.description = ''; promptForContractField('type', data); } },
+                    { label: 'CANCEL', color: '#ff3333', action: () => {} }
+                ]);
+            } else if (field === 'type') {
+                showCustomPrompt('CONTRACT TYPE', [
+                    { label: 'FIRST TO COMPLETE', action: () => { data.type = 'first'; promptForContractField('reward', data); } },
+                    { label: 'MANY CAN COMPLETE', action: () => { data.type = 'many'; promptForContractField('reward', data); } },
+                    { label: 'TIMED', action: () => { data.type = 'timed'; promptForContractField('reward', data); } },
+                    { label: 'CANCEL', color: '#ff3333', action: () => {} }
+                ]);
+            } else if (field === 'reward') {
+                showCustomPrompt('CONTRACT REWARD', [
+                    { label: 'ENTER REWARD', action: () => {
+                        const reward = prompt('Enter reward (optional):');
+                        data.reward = reward || '';
+                        promptForContractField('expiresAt', data);
+                    }},
+                    { label: 'SKIP', action: () => { data.reward = ''; promptForContractField('expiresAt', data); } },
+                    { label: 'CANCEL', color: '#ff3333', action: () => {} }
+                ]);
+            } else if (field === 'expiresAt') {
+                showCustomPrompt('CONTRACT EXPIRY', [
+                    { label: 'SET EXPIRY', action: () => {
+                        const hours = prompt('Expires in how many hours? (leave blank for no expiry)');
+                        if (hours && !isNaN(hours)) {
+                            data.expiresAt = Date.now() + (parseFloat(hours) * 3600000);
+                        }
+                        submitGlobalContract(data);
+                    }},
+                    { label: 'NO EXPIRY', action: () => { submitGlobalContract(data); } },
+                    { label: 'CANCEL', color: '#ff3333', action: () => {} }
+                ]);
+            }
+        }
+
+        function submitGlobalContract(data) {
+            if (!data.title) { showNotification('TITLE REQUIRED'); return; }
+            const contractId = 'gc_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            const contract = {
+                title: data.title,
+                description: data.description || '',
+                issuerUid: localStorage.getItem('pipboy-uid') || 'unknown',
+                issuerName: userProfile.name || 'UNKNOWN',
+                type: data.type || 'first',
+                reward: data.reward || '',
+                expiresAt: data.expiresAt || null,
+                status: 'open',
+                completedBy: data.type === 'many' ? [] : null,
+                createdAt: Date.now()
+            };
+            
+            window.firebaseSet(window.firebaseRef(window.db, 'globalContracts/' + contractId), contract)
+                .then(() => {
+                    showNotification('GLOBAL CONTRACT CREATED');
+                    renderGlobalContracts();
+                })
+                .catch(err => showNotification('ERROR: ' + err.message));
+        }
+
+        // v0.70: Create bounty (overseer only)
+        function createBounty() {
+            const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
+            if (!isDev) { showNotification('OVERSEER ACCESS REQUIRED'); return; }
+            
+            showCustomPrompt('POST BOUNTY', [
+                { label: 'SELECT TARGET', action: () => promptForBountyField('target') },
+                { label: 'CANCEL', color: '#ff3333', action: () => {} }
+            ]);
+        }
+
+        function promptForBountyField(field, data = {}) {
+            if (field === 'target') {
+                // Show list of known wastelanders
+                const wastelanders = Object.entries(lastKnownBeaconData || {}).map(([uid, b]) => ({
+                    uid, name: b.name || 'UNKNOWN'
+                }));
+                if (wastelanders.length === 0) {
+                    showNotification('NO WASTELANDERS FOUND');
+                    return;
+                }
+                const buttons = wastelanders.map(w => ({
+                    label: w.name,
+                    action: () => { data.targetUid = w.uid; data.targetName = w.name; promptForBountyField('reason', data); }
+                }));
+                buttons.push({ label: 'CANCEL', color: '#ff3333', action: () => {} });
+                showCustomPrompt('SELECT BOUNTY TARGET', buttons);
+            } else if (field === 'reason') {
+                showCustomPrompt('BOUNTY REASON', [
+                    { label: 'ENTER REASON', action: () => {
+                        const reason = prompt('Enter bounty reason:');
+                        data.reason = reason || '';
+                        promptForBountyField('reward', data);
+                    }},
+                    { label: 'SKIP', action: () => { data.reason = ''; promptForBountyField('reward', data); } },
+                    { label: 'CANCEL', color: '#ff3333', action: () => {} }
+                ]);
+            } else if (field === 'reward') {
+                showCustomPrompt('BOUNTY REWARD', [
+                    { label: 'ENTER REWARD', action: () => {
+                        const reward = prompt('Enter reward (optional):');
+                        data.reward = reward || '';
+                        promptForBountyField('expiresAt', data);
+                    }},
+                    { label: 'SKIP', action: () => { data.reward = ''; promptForBountyField('expiresAt', data); } },
+                    { label: 'CANCEL', color: '#ff3333', action: () => {} }
+                ]);
+            } else if (field === 'expiresAt') {
+                showCustomPrompt('BOUNTY EXPIRY', [
+                    { label: 'SET EXPIRY', action: () => {
+                        const hours = prompt('Expires in how many hours? (leave blank for no expiry)');
+                        if (hours && !isNaN(hours)) {
+                            data.expiresAt = Date.now() + (parseFloat(hours) * 3600000);
+                        }
+                        submitBounty(data);
+                    }},
+                    { label: 'NO EXPIRY', action: () => { submitBounty(data); } },
+                    { label: 'CANCEL', color: '#ff3333', action: () => {} }
+                ]);
+            }
+        }
+
+        function submitBounty(data) {
+            if (!data.targetUid || !data.targetName) { showNotification('TARGET REQUIRED'); return; }
+            const bountyId = 'bty_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            const bounty = {
+                targetUid: data.targetUid,
+                targetName: data.targetName,
+                issuerUid: localStorage.getItem('pipboy-uid') || 'unknown',
+                issuerName: userProfile.name || 'UNKNOWN',
+                reason: data.reason || '',
+                reward: data.reward || '',
+                expiresAt: data.expiresAt || null,
+                status: 'open',
+                claimedBy: null,
+                createdAt: Date.now()
+            };
+            
+            window.firebaseSet(window.firebaseRef(window.db, 'bounties/' + bountyId), bounty)
+                .then(() => {
+                    showNotification('BOUNTY POSTED');
+                    renderBounties();
+                })
+                .catch(err => showNotification('ERROR: ' + err.message));
+        }
+
+        // v0.70: Open global contract modal
+        function openGlobalContractModal(id, c) {
+            const myUid = localStorage.getItem('pipboy-uid');
+            const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
+            const canComplete = c.status === 'open' && (!c.expiresAt || c.expiresAt > Date.now());
+            const alreadyCompleted = c.type === 'many' && c.completedBy && c.completedBy.includes(myUid);
+            
+            const buttons = [];
+            if (canComplete && !alreadyCompleted) {
+                buttons.push({ label: 'COMPLETE CONTRACT', action: () => completeGlobalContract(id, c) });
+            }
+            if (isDev && c.status === 'open') {
+                buttons.push({ label: 'VERIFY (OVERSEER)', action: () => verifyGlobalContract(id, c) });
+                buttons.push({ label: 'CANCEL CONTRACT', color: '#ff3333', action: () => cancelGlobalContract(id) });
+            }
+            buttons.push({ label: 'CLOSE', action: () => {} });
+            
+            const typeLabel = c.type === 'first' ? 'FIRST TO COMPLETE' : (c.type === 'many' ? 'MANY CAN COMPLETE' : 'TIMED');
+            const statusInfo = alreadyCompleted ? 'YOU COMPLETED THIS' : (c.status === 'open' ? 'OPEN' : c.status.toUpperCase());
+            
+            showCustomPrompt(`${escapeHtml(c.title)}\n\n${escapeHtml(c.description || '')}\n\nTYPE: ${typeLabel}\nSTATUS: ${statusInfo}${c.reward ? '\nREWARD: ' + escapeHtml(c.reward) : ''}`, buttons);
+        }
+
+        // v0.70: Complete global contract
+        function completeGlobalContract(id, c) {
+            const myUid = localStorage.getItem('pipboy-uid');
+            const myName = userProfile.name || 'UNKNOWN';
+            
+            const updates = {};
+            if (c.type === 'first') {
+                updates.status = 'completed';
+                updates.completedBy = myUid;
+                updates.verifiedBy = null; // needs verification
+            } else if (c.type === 'many') {
+                const completedBy = c.completedBy || [];
+                if (!completedBy.includes(myUid)) {
+                    completedBy.push(myUid);
+                    updates.completedBy = completedBy;
+                }
+            }
+            
+            window.firebaseUpdate(window.firebaseRef(window.db, 'globalContracts/' + id), updates)
+                .then(() => {
+                    showNotification('CONTRACT COMPLETED - AWAITING VERIFICATION');
+                    renderGlobalContracts();
+                })
+                .catch(err => showNotification('ERROR: ' + err.message));
+        }
+
+        // v0.70: Verify global contract (overseer)
+        function verifyGlobalContract(id, c) {
+            const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
+            if (!isDev) { showNotification('OVERSEER ACCESS REQUIRED'); return; }
+            
+            window.firebaseUpdate(window.firebaseRef(window.db, 'globalContracts/' + id), { verifiedBy: userProfile.name || 'OVERSEER' })
+                .then(() => {
+                    showNotification('CONTRACT VERIFIED');
+                    renderGlobalContracts();
+                })
+                .catch(err => showNotification('ERROR: ' + err.message));
+        }
+
+        // v0.70: Cancel global contract (overseer)
+        function cancelGlobalContract(id) {
+            const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
+            if (!isDev) { showNotification('OVERSEER ACCESS REQUIRED'); return; }
+            
+            window.firebaseRemove(window.firebaseRef(window.db, 'globalContracts/' + id))
+                .then(() => {
+                    showNotification('CONTRACT CANCELLED');
+                    renderGlobalContracts();
+                })
+                .catch(err => showNotification('ERROR: ' + err.message));
+        }
+
+        // v0.70: Open bounty modal
+        function openBountyModal(id, b) {
+            const myUid = localStorage.getItem('pipboy-uid');
+            const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
+            const canClaim = b.status === 'open' && b.targetUid !== myUid && (!b.expiresAt || b.expiresAt > Date.now());
+            
+            const buttons = [];
+            if (canClaim) {
+                buttons.push({ label: 'CLAIM BOUNTY (SCAN TARGET)', action: () => claimBounty(id, b) });
+            }
+            if (isDev && b.status === 'open') {
+                buttons.push({ label: 'VERIFY (OVERSEER)', action: () => verifyBounty(id, b) });
+                buttons.push({ label: 'CANCEL BOUNTY', color: '#ff3333', action: () => cancelBounty(id) });
+            }
+            buttons.push({ label: 'CLOSE', action: () => {} });
+            
+            const statusInfo = b.status === 'open' ? 'OPEN' : b.status.toUpperCase();
+            
+            showCustomPrompt(`☠ BOUNTY: ${escapeHtml(b.targetName)}\n\n${escapeHtml(b.reason || '')}\n\nSTATUS: ${statusInfo}${b.reward ? '\nREWARD: ' + escapeHtml(b.reward) : ''}`, buttons);
+        }
+
+        // v0.70: Claim bounty (scan target's datacard)
+        function claimBounty(id, b) {
+            showNotification('SCAN TARGET\'S DATACARD TO CLAIM BOUNTY');
+            // Store pending bounty claim
+            window.pendingBountyClaim = { id, bounty: b };
+            // Start QR scanner
+            startQRScanner();
+        }
+
+        // v0.70: Verify bounty (overseer)
+        function verifyBounty(id, b) {
+            const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
+            if (!isDev) { showNotification('OVERSEER ACCESS REQUIRED'); return; }
+            
+            window.firebaseUpdate(window.firebaseRef(window.db, 'bounties/' + id), { 
+                status: 'claimed',
+                verifiedBy: userProfile.name || 'OVERSEER'
+            })
+                .then(() => {
+                    showNotification('BOUNTY VERIFIED');
+                    renderBounties();
+                })
+                .catch(err => showNotification('ERROR: ' + err.message));
+        }
+
+        // v0.70: Cancel bounty (overseer)
+        function cancelBounty(id) {
+            const isDev = localStorage.getItem('pipboy-dev-mode') === 'true';
+            if (!isDev) { showNotification('OVERSEER ACCESS REQUIRED'); return; }
+            
+            window.firebaseRemove(window.firebaseRef(window.db, 'bounties/' + id))
+                .then(() => {
+                    showNotification('BOUNTY CANCELLED');
+                    renderBounties();
+                })
+                .catch(err => showNotification('ERROR: ' + err.message));
         }
 
         function getFactionRelation(rep) {
@@ -2829,38 +3255,62 @@
 
         // v0.63: render scrollable list of live wastelanders below map
         function renderWastelandersListMap() {
-            const el = document.getElementById('wastelanders-scroll');
-            if (!el) return;
+            const liveEl = document.getElementById('wastelanders-scroll');
+            const coldEl = document.getElementById('cold-wastelanders-scroll');
+            if (!liveEl || !coldEl) return;
             const now = Date.now();
             const myUid = localStorage.getItem('pipboy-uid');
             const live = [];
+            const cold = [];
             Object.keys(lastKnownBeaconData || {}).forEach(uid => {
                 if (uid === myUid) return; // skip self
                 const b = lastKnownBeaconData[uid];
                 if (!b || !b.timestamp) return;
                 const ageMin = Math.floor((now - b.timestamp) / 60000);
-                if (ageMin > 5) return; // only live (< 5 min)
                 const dist = (myLastLat !== null && typeof b.lat === 'number') ? getDistance(myLastLat, myLastLng, b.lat, b.lng) : null;
-                live.push({ uid, name: b.name || 'UNKNOWN', lat: b.lat, lng: b.lng, ageMin, dist });
+                const entry = { uid, name: b.name || 'UNKNOWN', lat: b.lat, lng: b.lng, ageMin, dist };
+                if (ageMin <= 5) {
+                    live.push(entry);
+                } else {
+                    cold.push(entry);
+                }
             });
             // Sort by distance (closest first), unknown distance at end
-            live.sort((a, b) => {
+            const sortByDist = (a, b) => {
                 if (a.dist === null && b.dist === null) return 0;
                 if (a.dist === null) return 1;
                 if (b.dist === null) return -1;
                 return a.dist - b.dist;
-            });
+            };
+            live.sort(sortByDist);
+            cold.sort(sortByDist);
+            
+            // Render live wastelanders
             if (!live.length) {
-                el.innerHTML = '<p style="opacity: 0.5; font-size: 0.85rem;">No live signals</p>';
-                return;
+                liveEl.innerHTML = '<p style="opacity: 0.5; font-size: 0.85rem;">No live signals</p>';
+            } else {
+                liveEl.innerHTML = live.map(w => {
+                    const distStr = w.dist !== null ? (w.dist < 1000 ? Math.round(w.dist) + 'm' : (w.dist / 1000).toFixed(1) + 'km') : '—';
+                    return `<div style="padding: 6px 0; border-bottom: 1px dashed var(--pip-color-dim); cursor: pointer;" onclick="mapGoToWastelander('${w.uid}', ${w.lat}, ${w.lng})">
+                        <div style="font-weight: bold;">${escapeHtml(w.name)}</div>
+                        <div style="font-size: 0.8rem; opacity: 0.7;">${distStr} · LKL ${w.ageMin}m ago</div>
+                    </div>`;
+                }).join('');
             }
-            el.innerHTML = live.map(w => {
-                const distStr = w.dist !== null ? (w.dist < 1000 ? Math.round(w.dist) + 'm' : (w.dist / 1000).toFixed(1) + 'km') : '—';
-                return `<div style="padding: 6px 0; border-bottom: 1px dashed var(--pip-color-dim); cursor: pointer;" onclick="mapGoToWastelander('${w.uid}', ${w.lat}, ${w.lng})">
-                    <div style="font-weight: bold;">${escapeHtml(w.name)}</div>
-                    <div style="font-size: 0.8rem; opacity: 0.7;">${distStr} · LKL ${w.ageMin}m ago</div>
-                </div>`;
-            }).join('');
+            
+            // Render cold wastelanders
+            if (!cold.length) {
+                coldEl.innerHTML = '<p style="opacity: 0.5; font-size: 0.8rem;">No cold signals</p>';
+            } else {
+                coldEl.innerHTML = cold.map(w => {
+                    const distStr = w.dist !== null ? (w.dist < 1000 ? Math.round(w.dist) + 'm' : (w.dist / 1000).toFixed(1) + 'km') : '—';
+                    const ageStr = w.ageMin < 60 ? w.ageMin + 'm ago' : Math.floor(w.ageMin / 60) + 'h ago';
+                    return `<div style="padding: 5px 0; border-bottom: 1px dashed var(--pip-color-dim); cursor: pointer;" onclick="mapGoToWastelander('${w.uid}', ${w.lat}, ${w.lng})">
+                        <div style="font-weight: bold;">${escapeHtml(w.name)}</div>
+                        <div style="font-size: 0.75rem; opacity: 0.6;">${distStr} · ${ageStr}</div>
+                    </div>`;
+                }).join('');
+            }
         }
 
         // v0.63: center map on a wastelander from the list
@@ -3393,7 +3843,7 @@
             return html;
         }
 
-        // v0.67: load all Glowing Ones from Firebase
+        // v0.67: load all Glowing Ones from Firebase (including stale beacons)
         function loadOverseerGlowingOnes() {
             const el = document.getElementById('overseer-glowing-list');
             if (!el || !window.db) {
@@ -3407,20 +3857,29 @@
                 const now = Date.now();
                 const glowing = Object.keys(data).filter(uid => {
                     const u = data[uid];
-                    return u.glowingOne === true && u.timestamp && (now - u.timestamp) < 5 * 60 * 1000; // live only
+                    return u.glowingOne === true; // show ALL Glowing Ones, even stale
                 }).map(uid => {
                     const u = data[uid];
-                    return { uid, name: u.name || 'UNKNOWN', rads: u.rads || 0 };
-                }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                    const age = u.timestamp ? (now - u.timestamp) : null;
+                    const isLive = age !== null && age < 5 * 60 * 1000;
+                    return { uid, name: u.name || 'UNKNOWN', rads: u.rads || 0, age, isLive };
+                }).sort((a, b) => {
+                    // Live first, then by name
+                    if (a.isLive && !b.isLive) return -1;
+                    if (!a.isLive && b.isLive) return 1;
+                    return (a.name || '').localeCompare(b.name || '');
+                });
                 if (!glowing.length) {
                     el.innerHTML = '<p style="opacity:0.5;">No Glowing Ones found</p>';
                     return;
                 }
-                let html = '<p style="margin-bottom:10px;">' + glowing.length + ' Glowing One' + (glowing.length > 1 ? 's' : '') + '</p>';
+                const liveCount = glowing.filter(g => g.isLive).length;
+                let html = '<p style="margin-bottom:10px;">' + glowing.length + ' Glowing One' + (glowing.length > 1 ? 's' : '') + ' (' + liveCount + ' live)</p>';
                 glowing.forEach(g => {
-                    html += '<div style="padding:6px 0; border-bottom:1px dashed var(--pip-color-dim);">';
-                    html += '<div style="font-weight:bold; color:#39ff14;">☢ ' + escapeHtml(g.name) + '</div>';
-                    html += '<div style="font-size:0.8rem; opacity:0.7;">Rads: ' + g.rads + '</div>';
+                    const ageStr = g.age !== null ? (g.age < 60000 ? Math.floor(g.age / 1000) + 's ago' : g.age < 3600000 ? Math.floor(g.age / 60000) + 'm ago' : g.age < 86400000 ? Math.floor(g.age / 3600000) + 'h ago' : Math.floor(g.age / 86400000) + 'd ago') : 'never';
+                    html += '<div style="padding:6px 0; border-bottom:1px dashed var(--pip-color-dim); opacity:' + (g.isLive ? '1' : '0.6') + ';">';
+                    html += '<div style="font-weight:bold; color:#39ff14;">☢ ' + escapeHtml(g.name) + (g.isLive ? '' : ' <span style="color:#ffb642; font-size:0.8rem;">[STALE]</span>') + '</div>';
+                    html += '<div style="font-size:0.8rem; opacity:0.7;">Rads: ' + g.rads + ' · Last seen: ' + ageStr + '</div>';
                     html += '<button class="pip-btn" onclick="cureGlowingOne(\'' + g.uid + '\', \'' + escapeHtml(g.name) + '\')" style="margin-top:5px; border-color:#39ff14; color:#39ff14; font-size:0.85rem;">[CURE]</button>';
                     html += '</div>';
                 });
@@ -4203,6 +4662,31 @@
             const name = (sep > -1 ? rest.slice(sep + 1) : 'UNKNOWN WASTELANDER').toUpperCase();
             if (!uid) { showNotification('DATACARD CORRUPTED. RESCAN.'); return; }
             if (uid === myMailUid) { showNotification('THAT IS YOUR OWN DATACARD, WASTELANDER.'); return; }
+            
+            // v0.70: Check for pending bounty claim
+            if (window.pendingBountyClaim && window.pendingBountyClaim.bounty.targetUid === uid) {
+                const bountyId = window.pendingBountyClaim.id;
+                const myUid = localStorage.getItem('pipboy-uid');
+                const myName = userProfile.name || 'UNKNOWN';
+                
+                window.firebaseUpdate(window.firebaseRef(window.db, 'bounties/' + bountyId), {
+                    status: 'claimed',
+                    claimedBy: myUid,
+                    claimedByName: myName,
+                    claimedAt: Date.now()
+                })
+                    .then(() => {
+                        showNotification('BOUNTY CLAIMED - AWAITING VERIFICATION');
+                        window.pendingBountyClaim = null;
+                        renderBounties();
+                    })
+                    .catch(err => {
+                        showNotification('ERROR CLAIMING BOUNTY: ' + err.message);
+                        window.pendingBountyClaim = null;
+                    });
+                return;
+            }
+            
             if (isContact(uid)) { showNotification(contactByUid(uid).name + ' ALREADY LOGGED IN WASTELANDERS MET.'); return; }
             showCustomPrompt('ADD ' + name + ' TO WASTELANDERS MET? THEY WILL BE NOTIFIED OF THE LINK.', [
                 {
@@ -4411,6 +4895,9 @@
         // v0.58: decontamination station state
         let deconActive = false;   // currently inside a decon zone
         let deconFired = false;    // effect already fired this visit (once per entry)
+        // v0.70: global contracts and bounties state
+        let globalContracts = {}; // contractId -> contract data
+        let bounties = {};        // bountyId -> bounty data
 
         function adjustRads(delta) {
             const before = userProfile.rads || 0;
@@ -4624,6 +5111,26 @@
                 if (statsPaneActive()) renderStatsTab(); // v0.53
                 if (overseerPaneActive()) renderOverseerTab(); // v0.58
             }, () => {}); // offline: last known zone board stands
+        }
+
+        // v0.70: Global contracts listener
+        function startGlobalContractsListener() {
+            window.firebaseOnValue(window.firebaseRef(window.db, 'globalContracts/'), (snap) => {
+                globalContracts = snap.val() || {};
+                if (document.getElementById('quest-tab-global') && document.getElementById('quest-tab-global').classList.contains('active')) {
+                    renderGlobalContracts();
+                }
+            }, () => {}); // offline: last known contracts stand
+        }
+
+        // v0.70: Bounties listener
+        function startBountiesListener() {
+            window.firebaseOnValue(window.firebaseRef(window.db, 'bounties/'), (snap) => {
+                bounties = snap.val() || {};
+                if (document.getElementById('quest-tab-bounties') && document.getElementById('quest-tab-bounties').classList.contains('active')) {
+                    renderBounties();
+                }
+            }, () => {}); // offline: last known bounties stand
         }
 
         // --- OVERSEER PARIAH CONTROL (STATS tab, dev-mode only) ---
@@ -6206,6 +6713,8 @@
                 startPariahListener(); // v0.46
                 startRadZoneListener(); // v0.47
                 startStarchedListener(); // v0.58: Starched Genes global toggle
+                startGlobalContractsListener(); // v0.70: Global contracts
+                startBountiesListener(); // v0.70: Bounties
                 flushOutbox();
                 refreshOutboxStatuses();
                 renderMailBadge();
